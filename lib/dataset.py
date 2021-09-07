@@ -208,7 +208,7 @@ class ScannetDataset():
 
         print("generate new chunks for {}...".format(self.phase))
         for scene_id in tqdm(self.scene_list):
-            scene = self.scene_data[scene_id]
+            '''scene = self.scene_data[scene_id]
             semantic = scene[:, 10].astype(np.int32)
             if self.use_multiview:
                 feature = self.multiview_data[scene_id]
@@ -247,7 +247,9 @@ class ScannetDataset():
 
             choices = np.random.choice(chunk.shape[0], self.npoints, replace=True)
             chunk = chunk[choices]
-            self.chunk_data[scene_id] = chunk
+            self.chunk_data[scene_id] = chunk'''
+            self.chunk_data[scene_id] = np.load('/content/Pointnet2.ScanNet/fix_inp.npy')
+            #np.save('/content/Pointnet2.ScanNet/fix_inp', chunk)
             
         print("done!\n")
 
