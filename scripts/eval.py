@@ -174,7 +174,7 @@ def eval_wholescene(args, model, dataloader):
 def evaluate(args):
     # prepare data
     print("preparing data...")
-    scene_list = get_scene_list("data/scannetv2_val.txt")
+    scene_list = get_scene_list("data/scannetv2_100_test.txt")
     dataset = ScannetDatasetWholeScene(scene_list, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
     dataloader = DataLoader(dataset, batch_size=1, collate_fn=collate_wholescene)
 

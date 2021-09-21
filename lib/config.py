@@ -4,8 +4,8 @@ from easydict import EasyDict
 CONF = EasyDict()
 
 # BASE PATH
-CONF.ROOT = "/content/Pointnet2.ScanNet" # TODO change this
-CONF.SCANNET_DIR =  "/content/gdrive/MyDrive/Colab Notebooks/scannet_100_frames" # TODO change this
+CONF.ROOT = "/home/erik/TUM/Pointnet2.ScanNet" # TODO change this
+CONF.SCANNET_DIR =  "/home/erik/TUM/scannet_root" # TODO change this
 
 # Uncomment the followings if you're NOT on slurm
 # CONF.SCANNET_FRAMES_ROOT = os.path.join(CONF.ROOT, "frames_square")
@@ -30,7 +30,7 @@ CONF.OUTPUT_ROOT = os.path.join(CONF.ROOT, "outputs")
 CONF.ENET_WEIGHTS = os.path.join(CONF.ROOT, "data/scannetv2_enet.pth")
 CONF.MULTIVIEW = os.path.join(CONF.PREP_SCANS, "enet_feats.hdf5")
 
-CONF.SCANNETV2_TRAIN = os.path.join(CONF.ROOT, "data/scannetv2_100_train.txt")
+CONF.SCANNETV2_TRAIN = os.path.join(CONF.ROOT, "data/scannetv2_train.txt")
 CONF.SCANNETV2_VAL = os.path.join(CONF.ROOT, "data/scannetv2_100_val.txt")
 CONF.SCANNETV2_TEST = os.path.join(CONF.ROOT, "data/scannetv2_100_test.txt")
 CONF.SCANNETV2_LIST = os.path.join(CONF.ROOT, "data/scannetv2_100.txt")
