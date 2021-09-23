@@ -18,7 +18,8 @@ class SharedMLP(nn.Sequential):
             activation=nn.ReLU(inplace=True),
             preact: bool = False,
             first: bool = False,
-            name: str = ""
+            name: str = "",
+            mc_drop: bool = False
     ):
         super().__init__()
 
@@ -31,7 +32,8 @@ class SharedMLP(nn.Sequential):
                     bn=(not first or not preact or (i != 0)) and bn,
                     activation=activation
                     if (not first or not preact or (i != 0)) else None,
-                    preact=preact
+                    preact=preact,
+                    mc_drop=mc_drop
                 )
             )
 
@@ -80,7 +82,8 @@ class _ConvBase(nn.Sequential):
             batch_norm=None,
             bias=True,
             preact=False,
-            name=""
+            name="",
+            mc_drop=False
     ):
         super().__init__()
 
@@ -118,6 +121,9 @@ class _ConvBase(nn.Sequential):
 
             if activation is not None:
                 self.add_module(name + 'activation', activation)
+        
+        if mc_drop:
+            self.add_module(name + 'mc_dropout', MCDropout())
 
 
 class Conv1d(_ConvBase):
@@ -135,7 +141,8 @@ class Conv1d(_ConvBase):
             init=nn.init.kaiming_normal_,
             bias: bool = True,
             preact: bool = False,
-            name: str = ""
+            name: str = "",
+            mc_drop: bool = False
     ):
         super().__init__(
             in_size,
@@ -150,7 +157,8 @@ class Conv1d(_ConvBase):
             batch_norm=BatchNorm1d,
             bias=bias,
             preact=preact,
-            name=name
+            name=name,
+            mc_drop=mc_drop
         )
 
 
@@ -169,7 +177,8 @@ class Conv2d(_ConvBase):
             init=nn.init.kaiming_normal_,
             bias: bool = True,
             preact: bool = False,
-            name: str = ""
+            name: str = "",
+            mc_drop: bool = False
     ):
         super().__init__(
             in_size,
@@ -184,7 +193,8 @@ class Conv2d(_ConvBase):
             batch_norm=BatchNorm2d,
             bias=bias,
             preact=preact,
-            name=name
+            name=name,
+            mc_drop=mc_drop
         )
 
 
@@ -296,3 +306,18 @@ class BNMomentumScheduler(object):
         self.model.apply(self.setter(self.lmbd(epoch)))
 
 
+class MCDropout(nn.Module):
+    def __init__(self, p: float = 0.2):
+        super().__init__()
+        self.p = p
+
+    def forward(self, x):
+        return nn.functional.dropout(x, p=self.p, training=(not self.training))
+
+class AlwaysOnDropout(nn.Module):
+    def __init__(self, p: float = 0.2):
+        super().__init__()
+        self.p = p
+
+    def forward(self, x):
+        return nn.functional.dropout(x, p=self.p, training=True)

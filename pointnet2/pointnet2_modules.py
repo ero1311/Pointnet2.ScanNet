@@ -101,7 +101,8 @@ class PointnetSAModuleMSG(_PointnetSAModuleBase):
             mlps: List[List[int]],
             bn: bool = True,
             use_xyz: bool = True, 
-            sample_uniformly: bool = False
+            sample_uniformly: bool = False,
+            mc_drop: bool = False
     ):
         super().__init__()
 
@@ -121,7 +122,7 @@ class PointnetSAModuleMSG(_PointnetSAModuleBase):
             if use_xyz:
                 mlp_spec[0] += 3
 
-            self.mlps.append(pt_utils.SharedMLP(mlp_spec, bn=bn))
+            self.mlps.append(pt_utils.SharedMLP(mlp_spec, bn=bn, mc_drop=mc_drop))
 
 
 class PointnetSAModule(PointnetSAModuleMSG):
@@ -149,7 +150,8 @@ class PointnetSAModule(PointnetSAModuleMSG):
             radius: float = None,
             nsample: int = None,
             bn: bool = True,
-            use_xyz: bool = True
+            use_xyz: bool = True,
+            mc_drop: bool = False
     ):
         super().__init__(
             mlps=[mlp],
@@ -157,7 +159,8 @@ class PointnetSAModule(PointnetSAModuleMSG):
             radii=[radius],
             nsamples=[nsample],
             bn=bn,
-            use_xyz=use_xyz
+            use_xyz=use_xyz,
+            mc_drop=mc_drop
         )
 
 
@@ -364,9 +367,9 @@ class PointnetFPModule(nn.Module):
         Use batchnorm
     """
 
-    def __init__(self, *, mlp: List[int], bn: bool = True):
+    def __init__(self, *, mlp: List[int], bn: bool = True, mc_drop: bool = False):
         super().__init__()
-        self.mlp = pt_utils.SharedMLP(mlp, bn=bn)
+        self.mlp = pt_utils.SharedMLP(mlp, bn=bn, mc_drop=mc_drop)
 
     def forward(
             self, unknown: torch.Tensor, known: torch.Tensor,

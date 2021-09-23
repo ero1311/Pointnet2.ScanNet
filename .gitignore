@@ -18,4 +18,5 @@ preprocessing/label_point_clouds/
 
 # outputs
 outputs/
+active_outputs/
 logs/

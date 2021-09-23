@@ -4,7 +4,7 @@ from pointnet2_modules import PointnetFPModule, PointnetSAModule, PointnetSAModu
 import pytorch_utils as pt_utils
 
 
-def get_model(num_classes, is_msg=True, input_channels=6, use_xyz=True, bn=True):
+def get_model(num_classes, is_msg=True, input_channels=6, use_xyz=True, bn=True, mc_drop=False):
     if is_msg:
         model = Pointnet2MSG(
             num_classes=num_classes, 
@@ -17,7 +17,8 @@ def get_model(num_classes, is_msg=True, input_channels=6, use_xyz=True, bn=True)
         num_classes=num_classes, 
         input_channels=input_channels, 
         use_xyz=use_xyz, 
-        bn=bn
+        bn=bn,
+        mc_drop=mc_drop
     )
 
     return model
@@ -103,7 +104,7 @@ class Pointnet2MSG(nn.Module):
         return pred_cls
 
 class Pointnet2SSG(nn.Module):
-    def __init__(self, num_classes, input_channels=3, use_xyz=True, bn=True):
+    def __init__(self, num_classes, input_channels=3, use_xyz=True, bn=True, mc_drop=False):
         super().__init__()
 
         NPOINTS = [1024, 256, 64, 16]
@@ -132,7 +133,8 @@ class Pointnet2SSG(nn.Module):
                     nsample=NSAMPLE[k],
                     mlp=mlps,
                     use_xyz=use_xyz,
-                    bn=bn
+                    bn=bn,
+                    mc_drop=mc_drop
                 )
             )
             skip_channel_list.append(channel_out)
@@ -145,17 +147,21 @@ class Pointnet2SSG(nn.Module):
             self.FP_modules.append(
                 PointnetFPModule(
                     mlp=[pre_channel + skip_channel_list[k]] + FP_MLPS[k],
-                    bn=bn
+                    bn=bn,
+                    mc_drop=mc_drop
                 )
             )
 
         cls_layers = []
         pre_channel = FP_MLPS[0][-1]
         for k in range(0, CLS_FC.__len__()):
-            cls_layers.append(pt_utils.Conv1d(pre_channel, CLS_FC[k], bn=bn))
+            cls_layers.append(pt_utils.Conv1d(pre_channel, CLS_FC[k], bn=bn, mc_drop=mc_drop))
             pre_channel = CLS_FC[k]
-        cls_layers.append(pt_utils.Conv1d(pre_channel, num_classes, activation=None, bn=bn))
-        cls_layers.insert(1, nn.Dropout(DP_RATIO))
+        cls_layers.append(pt_utils.Conv1d(pre_channel, num_classes, activation=None, bn=bn, mc_drop=mc_drop))
+        if mc_drop:
+            cls_layers.insert(1, pt_utils.AlwaysOnDropout(DP_RATIO))
+        else:
+            cls_layers.insert(1, nn.Dropout(DP_RATIO))
         self.cls_layer = nn.Sequential(*cls_layers)
 
     def _break_up_pc(self, pc):
