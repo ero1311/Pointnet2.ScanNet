@@ -73,8 +73,12 @@ def predict_label(args, model, dataloader):
     return filtered
 
 def visualize(args, preds):
+    scene_gt = np.load(CONF.SCANNETV2_FILE.format(args.scene_id))
     vertex = []
+    max_x_coord = -np.inf
     for i in range(preds.shape[0]):
+        if preds[i][0] > max_x_coord:
+            max_x_coord = preds[i][0]
         vertex.append(
             (
                 preds[i][0],
@@ -85,7 +89,18 @@ def visualize(args, preds):
                 preds[i][5],
             )
         )
-
+    max_x_coord += 1
+    for i in range(scene_gt.shape[0]):
+        vertex.append(
+            (
+                scene_gt[i][0] + max_x_coord,
+                scene_gt[i][1],
+                scene_gt[i][2],
+                CONF.PALETTE[int(scene_gt[i][-1])][0],
+                CONF.PALETTE[int(scene_gt[i][-1])][1],
+                CONF.PALETTE[int(scene_gt[i][-1])][2]
+            )
+        )
     vertex = np.array(
         vertex,
         dtype=[

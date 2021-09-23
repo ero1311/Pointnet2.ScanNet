@@ -1,3 +1,6 @@
+#vscode files
+.vscode/
+
 # cache
 __pycache__ 
 lib/__pycache__
