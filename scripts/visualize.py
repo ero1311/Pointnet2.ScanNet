@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from plyfile import PlyElement, PlyData
+from torch.utils.tensorboard import SummaryWriter
 
 # for PointNet2.PyTorch module
 import sys
@@ -75,33 +76,59 @@ def predict_label(args, model, dataloader):
 def visualize(args, preds):
     scene_gt = np.load(CONF.SCANNETV2_FILE.format(args.scene_id))
     vertex = []
+    colors = []
     max_x_coord = -np.inf
     for i in range(preds.shape[0]):
         if preds[i][0] > max_x_coord:
             max_x_coord = preds[i][0]
         vertex.append(
-            (
+            [
                 preds[i][0],
                 preds[i][1],
-                preds[i][2],
-                preds[i][3],
-                preds[i][4],
-                preds[i][5],
-            )
+                preds[i][2]
+            ]
+        )
+        colors.append(
+            [
+                0,
+                0,
+                0
+            ]
         )
     max_x_coord += 1
+    for i in range(preds.shape[0]):
+        if preds[i][0] > max_x_coord:
+            max_x_coord = preds[i][0]
+        vertex.append(
+            [
+                preds[i][0] + max_x_coord,
+                preds[i][1],
+                preds[i][2]
+            ]
+        )
+        colors.append(
+            [
+                preds[i][3],
+                preds[i][4],
+                preds[i][5]
+            ]
+        )
     for i in range(scene_gt.shape[0]):
         vertex.append(
-            (
-                scene_gt[i][0] + max_x_coord,
+            [
+                scene_gt[i][0] + (2 * max_x_coord),
                 scene_gt[i][1],
-                scene_gt[i][2],
+                scene_gt[i][2]
+            ]
+        )
+        colors.append(
+            [
                 CONF.PALETTE[int(scene_gt[i][-1])][0],
                 CONF.PALETTE[int(scene_gt[i][-1])][1],
                 CONF.PALETTE[int(scene_gt[i][-1])][2]
-            )
+            ]
         )
-    vertex = np.array(
+    '''vertex = np.array(
         vertex,
         dtype=[
             ("x", np.dtype("float32")), 
@@ -111,13 +138,20 @@ def visualize(args, preds):
             ("green", np.dtype("uint8")),
             ("blue", np.dtype("uint8"))
         ]
-    )
+    )'''
 
-    output_pc = PlyElement.describe(vertex, "vertex")
-    output_pc = PlyData([output_pc])
-    output_root = os.path.join(CONF.OUTPUT_ROOT, args.folder, "preds")
-    os.makedirs(output_root, exist_ok=True)
-    output_pc.write(os.path.join(output_root, "{}.ply".format(args.scene_id)))
+    visual_path = os.path.join('/home/erik/TUM/Pointnet2.ScanNet', 'visualizations', args.folder, "tensorboard")
+    os.makedirs(visual_path, exist_ok=True)
+    logger = SummaryWriter(visual_path)
+    vertex = torch.as_tensor(vertex, dtype=torch.float).unsqueeze(0)
+    colors = torch.as_tensor(colors, dtype=torch.uint8).unsqueeze(0)
+    logger.add_mesh(args.scene_id, vertex, colors, config_dict={"camera": {"cls": "PerspectiveCamera", "fov": 75}, "material": {"cls": "MeshBasicMaterial", "reflectivity": 1}})
+    logger.close()
+    #output_pc = PlyElement.describe(vertex, "vertex")
+    #output_pc = PlyData([output_pc])
+    #output_root = os.path.join(CONF.OUTPUT_ROOT, args.folder, "preds")
+    #os.makedirs(output_root, exist_ok=True)
+    #output_pc.write(os.path.join(output_root, "{}.ply".format(args.scene_id)))
 
 
 def get_scene_list(args):
@@ -138,7 +172,7 @@ def evaluate(args):
 
     # load model
     print("loading model...")
-    model_path = os.path.join(CONF.OUTPUT_ROOT, args.folder, "model.pth")
+    model_path = os.path.join(args.output_root, args.folder, "model.pth")
     Pointnet = importlib.import_module("pointnet2_semseg")
     input_channels = int(args.use_color) * 3 + int(args.use_normal) * 3 + int(args.use_multiview) * 128
     model = Pointnet.get_model(num_classes=CONF.NUM_CLASSES, is_msg=args.use_msg, input_channels=input_channels, use_xyz=not args.no_xyz, bn=not args.no_bn).cuda()
@@ -156,6 +190,7 @@ def evaluate(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--output_root', type=str, help='output folder containing the best model from training', default='outputs')
     parser.add_argument('--folder', type=str, help='output folder containing the best model from training', required=True)
     parser.add_argument('--batch_size', type=int, help='size of the batch/chunk', default=1)
     parser.add_argument('--gpu', type=str, help='gpu', default='0')

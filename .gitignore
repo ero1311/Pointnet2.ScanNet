@@ -20,3 +20,4 @@ preprocessing/label_point_clouds/
 outputs/
 active_outputs/
 logs/
+visualizations/

@@ -180,7 +180,7 @@ def run_experiments(args):
     val_scene_list = rand_gen.choice(all_scenes_pool, size=20, replace=False)
     train_scenes_pool = list(set(all_scenes_pool).difference(set(val_scene_list)))
     print("Train Pool is of size {}".format(len(train_scenes_pool)))
-    random_scenes_list = rand_gen.choice(train_scenes_pool, size=100, replace=False)
+    random_scenes_list = list(rand_gen.choice(train_scenes_pool, size=100, replace=False))
     mc_scenes_list = list(random_scenes_list)
     out_dir = Path(args.output)
     experiments = list(out_dir.glob('experiment*'))
@@ -191,19 +191,19 @@ def run_experiments(args):
         experiment_prefix = "experiment_" + str(max_id)
     experiment = experiment_prefix + "_rand_0"
     train(args, random_scenes_list, val_scene_list, experiment)
-    #rand_0_pixel_miou = evaluate_pixel_miou(args, experiment)
+    rand_0_pixel_miou = evaluate_pixel_miou(args, experiment)
     copytree(os.path.join(args.output, experiment), os.path.join(args.output, experiment_prefix + "_mc_0"))
     tb_path = os.path.join(args.output, experiment_prefix, "tensorboard")
     os.makedirs(tb_path, exist_ok=True)
     logger = SummaryWriter(tb_path)
-    '''logger.add_scalars(
+    logger.add_scalars(
         "eval/{}".format("point_miou"),
         {
             "random": rand_0_pixel_miou,
             "mc_dropout": rand_0_pixel_miou
         },
         0
-    )'''
+    )
     for i in range(1, 6):
         #Perform MC active learning
         mc_scenes_pool = list(set(train_scenes_pool).difference(set(mc_scenes_list)))
@@ -212,24 +212,23 @@ def run_experiments(args):
         mc_scenes_list += new_scenes
         experiment = experiment_prefix + "_mc_" + str(i)
         train(args, mc_scenes_list, val_scene_list, experiment)
-        #mc_pixel_miou = evaluate_pixel_miou(args, experiment)
+        mc_pixel_miou = evaluate_pixel_miou(args, experiment)
 
         #perform random choice
         random_scenes_pool = list(set(train_scenes_pool).difference(set(random_scenes_list)))
-        new_scenes = rand_gen.choice(random_scenes_pool, size=100, replace=False)
+        new_scenes = list(rand_gen.choice(random_scenes_pool, size=100, replace=False))
         random_scenes_list += new_scenes
         experiment = experiment_prefix + "_rand_" + str(i)
         train(args, random_scenes_list, val_scene_list, experiment)
-        #random_pixel_miou = evaluate_pixel_miou(args, experiment)
-
-        '''logger.add_scalars(
+        random_pixel_miou = evaluate_pixel_miou(args, experiment)
+        logger.add_scalars(
             "eval/{}".format("point_miou"),
             {
                 "random": random_pixel_miou,
                 "mc_dropout": mc_pixel_miou
             },
             i
-        )'''
+        )
 
 
 if __name__ == '__main__':
