@@ -134,12 +134,11 @@ class Pointnet2SSG(nn.Module):
                     mlp=mlps,
                     use_xyz=use_xyz,
                     bn=bn,
-                    mc_drop=mc_drop
+                    mc_drop=False
                 )
             )
             skip_channel_list.append(channel_out)
             channel_in = channel_out
-
         self.FP_modules = nn.ModuleList()
 
         for k in range(FP_MLPS.__len__()):
@@ -148,18 +147,17 @@ class Pointnet2SSG(nn.Module):
                 PointnetFPModule(
                     mlp=[pre_channel + skip_channel_list[k]] + FP_MLPS[k],
                     bn=bn,
-                    mc_drop=mc_drop
+                    mc_drop=False
                 )
             )
-
         cls_layers = []
         pre_channel = FP_MLPS[0][-1]
         for k in range(0, CLS_FC.__len__()):
-            cls_layers.append(pt_utils.Conv1d(pre_channel, CLS_FC[k], bn=bn, mc_drop=mc_drop))
+            cls_layers.append(pt_utils.Conv1d(pre_channel, CLS_FC[k], bn=bn, mc_drop=False))
             pre_channel = CLS_FC[k]
-        cls_layers.append(pt_utils.Conv1d(pre_channel, num_classes, activation=None, bn=bn, mc_drop=mc_drop))
+        cls_layers.append(pt_utils.Conv1d(pre_channel, num_classes, activation=None, bn=bn, mc_drop=False))
         if mc_drop:
-            cls_layers.insert(1, pt_utils.AlwaysOnDropout(DP_RATIO))
+            cls_layers.insert(1, pt_utils.AlwaysOnDropout(p=0.25))
         else:
             cls_layers.insert(1, nn.Dropout(DP_RATIO))
         self.cls_layer = nn.Sequential(*cls_layers)

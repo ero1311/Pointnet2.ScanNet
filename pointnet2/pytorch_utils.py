@@ -123,7 +123,10 @@ class _ConvBase(nn.Sequential):
                 self.add_module(name + 'activation', activation)
         
         if mc_drop:
-            self.add_module(name + 'mc_dropout', MCDropout())
+            if type(conv) == nn.Conv1d:
+                self.add_module(name + 'mc_dropout', MCDropout())
+            elif conv == nn.Conv2d:
+                self.add_module(name + 'mc_dropout', MCDropout2D())
 
 
 class Conv1d(_ConvBase):
@@ -307,15 +310,23 @@ class BNMomentumScheduler(object):
 
 
 class MCDropout(nn.Module):
-    def __init__(self, p: float = 0.2):
+    def __init__(self, p: float = 0.25):
         super().__init__()
         self.p = p
 
     def forward(self, x):
         return nn.functional.dropout(x, p=self.p, training=(not self.training))
 
+class MCDropout2D(nn.Module):
+    def __init__(self, p: float = 0.25):
+        super().__init__()
+        self.p = p
+
+    def forward(self, x):
+        return nn.functional.dropout2d(x, p=self.p, training=(not self.training))
+
 class AlwaysOnDropout(nn.Module):
-    def __init__(self, p: float = 0.2):
+    def __init__(self, p: float = 0.25):
         super().__init__()
         self.p = p
 
