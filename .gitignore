@@ -21,3 +21,8 @@ outputs/
 active_outputs/
 logs/
 visualizations/
+
+#supervisor files
+*.conf*
+*.log*
+*.pid*
