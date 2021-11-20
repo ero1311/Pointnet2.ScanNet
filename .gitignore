@@ -19,6 +19,7 @@ preprocessing/label_point_clouds/
 # outputs
 outputs/
 active_outputs/
+active_outputs_pointwise/
 logs/
 visualizations/
 
