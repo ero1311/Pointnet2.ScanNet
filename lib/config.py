@@ -30,7 +30,7 @@ CONF.OUTPUT_ROOT = os.path.join(CONF.ROOT, "active_outputs_pointwise")
 CONF.ENET_WEIGHTS = os.path.join(CONF.ROOT, "data/scannetv2_enet.pth")
 CONF.MULTIVIEW = os.path.join(CONF.PREP_SCANS, "enet_feats.hdf5")
 
-CONF.SCANNETV2_TRAIN = os.path.join(CONF.ROOT, "data/scannetv2_train_100k_points.txt")
+CONF.SCANNETV2_TRAIN = os.path.join(CONF.ROOT, "data/scannetv2_train.txt")
 CONF.SCANNETV2_VAL = os.path.join(CONF.ROOT, "data/scannetv2_100_val.txt")
 CONF.SCANNETV2_TEST = os.path.join(CONF.ROOT, "data/scannetv2_100_test.txt")
 CONF.SCANNETV2_LIST = os.path.join(CONF.ROOT, "data/scannetv2_100.txt")

@@ -662,8 +662,8 @@ class ScannetDatasetActiveLearning():
         :type mc_iters: int
         '''
         print("Choosing new points with {} heuristic ...".format(heuristic))
-        xlength = 0.5
-        ylength = 0.5
+        xlength = 1.5
+        ylength = 1.5
         for scene_id in tqdm(self.scene_list):
             scene_data = self.scene_data[scene_id]
             scene_data = scene_data[np.logical_not(self.selected_mask[scene_id])]

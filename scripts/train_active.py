@@ -4,15 +4,12 @@ import json
 import argparse
 import importlib
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from datetime import datetime
 from torch.utils.data import DataLoader
 from pathlib import Path
 from copy import deepcopy
 from torch.utils.tensorboard import SummaryWriter
-from collections import OrderedDict
 from shutil import copytree
 from scipy.stats import mode
 
@@ -21,19 +18,9 @@ from lib.solver import Solver
 from lib.dataset import ScannetDataset, ScannetDatasetActiveLearning, ScannetDatasetWholeScene, collate_random, collate_wholescene
 from lib.loss import WeightedCrossEntropyLoss
 from lib.config import CONF
-from lib.inference_utils import mc_forward, prep_visualization, filter_points
+from lib.inference_utils import prep_visualization, filter_points
 from eval import filter_points, eval_wholescene
 
-
-def get_dataloader(args, scene_list, phase):
-    if args.use_wholescene:
-        dataset = ScannetDatasetWholeScene(scene_list, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
-        dataloader = DataLoader(dataset, batch_size=1, collate_fn=collate_wholescene, num_workers=args.num_workers, pin_memory=True)
-    else:
-        dataset = ScannetDatasetActiveLearning(phase, scene_list, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_random, num_workers=args.num_workers, pin_memory=True)
-
-    return dataset, dataloader
 
 def get_num_params(model):
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
@@ -80,48 +67,6 @@ def save_info(args, root, train_examples, val_examples, num_params):
     with open(os.path.join(root, "info.json"), "w") as f:
         json.dump(info, f, indent=4)
 
-
-def choose_uncertain_scenes(args, scene_list, stamp, num_scenes=100, use_gt=False):
-    model_path = os.path.join(args.output, stamp, "model.pth")
-    Pointnet = importlib.import_module("pointnet2_semseg")
-    input_channels = int(args.use_color) * 3 + int(args.use_normal) * 3 + int(args.use_multiview) * 128
-    model = Pointnet.get_model(num_classes=CONF.NUM_CLASSES, is_msg=args.use_msg, input_channels=input_channels, use_xyz=not args.no_xyz, bn=not args.no_bn, mc_drop=not use_gt).cuda()
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-    scene_uncertainties = {}
-    for scene in scene_list:
-        dataset = ScannetDatasetWholeScene([scene], use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
-        dataloader = DataLoader(dataset, batch_size=1, collate_fn=collate_wholescene)
-        if use_gt:
-            _, _, _, _, _, pointmiou_per_class_array, _, masks = eval_wholescene(args, model, dataloader)
-            avg_pointmiou_per_class = np.sum(pointmiou_per_class_array * masks, axis=0)/np.sum(masks, axis=0)
-            scene_entropy = np.sum(avg_pointmiou_per_class[masks.squeeze().astype(bool)]) / np.sum(masks.squeeze())
-        else:
-            data = next(iter(dataloader))
-            coords, feats, targets, weights, _ = data
-            coords, feats, targets, weights = coords.cuda(), feats.cuda(), targets.cuda(), weights.cuda()
-            preds = mc_forward(args.batch_size, model, coords, feats)
-            _, _, _, MC = preds.shape
-            coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
-            preds = preds.view(-1, MC).cpu().numpy()
-            targets = targets.squeeze(0).view(-1).cpu().numpy()
-            weights = weights.squeeze(0).view(-1).cpu().numpy()
-            coords, preds, targets, weights = filter_points(coords, preds, targets, weights)
-            scene_entropy = np.zeros(preds.shape[0])
-            for c in range(CONF.NUM_CLASSES):
-                p = np.sum(preds == c, axis=1, dtype=np.float32) / MC
-                scene_entropy = scene_entropy - (p * np.log2(p + 1e-12))
-            mc_preds = mode(preds, axis=1)[0].squeeze()
-            class_entropies = np.zeros(CONF.NUM_CLASSES)
-            for c in range(CONF.NUM_CLASSES):
-                class_entropies[c] = np.mean(scene_entropy[targets == c])
-            scene_entropy = np.sum(class_entropies[~np.isnan(class_entropies)]) / np.sum(~np.isnan(class_entropies))
-        scene_uncertainties[scene] = scene_entropy
-    
-    print(list(OrderedDict(sorted(scene_uncertainties.items(), key=lambda x: x[1], reverse=not use_gt)).items())[:num_scenes])
-
-    return list(OrderedDict(sorted(scene_uncertainties.items(), key=lambda x: x[1], reverse=not use_gt)).keys())[:num_scenes]
-
 def train(args, train_dataset, val_dataset, stamp):
     # init training dataset
     print("preparing data...")
@@ -159,13 +104,14 @@ def train(args, train_dataset, val_dataset, stamp):
 def evaluate_pixel_miou(args, stamp):
     # prepare data
     print("preparing data...")
-    scene_list = get_scene_list("data/scannetv2_100_test.txt")
+    scene_list = get_scene_list(CONF.SCANNETV2_TEST)
     dataset = ScannetDatasetWholeScene(scene_list, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
     dataloader = DataLoader(dataset, batch_size=1, collate_fn=collate_wholescene)
 
     # load model
     print("loading model...")
-    model_path = os.path.join(args.output, stamp, "model.pth")
+    model_path = "model.pth" if args.use_best else "model_last.pth"
+    model_path = os.path.join(args.output, stamp, model_path)
     Pointnet = importlib.import_module("pointnet2_semseg")
     input_channels = int(args.use_color) * 3 + int(args.use_normal) * 3 + int(args.use_multiview) * 128
     model = Pointnet.get_model(num_classes=CONF.NUM_CLASSES, is_msg=args.use_msg, input_channels=input_channels, use_xyz=not args.no_xyz, bn=not args.no_bn).cuda()
@@ -184,7 +130,7 @@ def evaluate_pixel_miou(args, stamp):
 def run_experiments(args):
     rand_gen = np.random.default_rng(args.seed)
     all_scenes_pool = get_scene_list(CONF.SCANNETV2_TRAIN)
-    val_scene_list = rand_gen.choice(all_scenes_pool, size=20, replace=False)
+    val_scene_list = get_scene_list(CONF.SCANNETV2_VAL) #rand_gen.choice(all_scenes_pool, size=20, replace=False)
     train_scenes_pool = list(set(all_scenes_pool).difference(set(val_scene_list)))
     print("Train Pool is of size {}".format(len(train_scenes_pool)))
     initial_scenes_list = list(rand_gen.choice(train_scenes_pool, size=args.num_scenes, replace=False))
@@ -246,6 +192,11 @@ def run_experiments(args):
         #Perform MC active learning
         prev_mc_experiment = experiment_prefix + "_mc_" + str(i - 1)
         model = get_model(args, prev_mc_experiment, mc_drop=True)
+        mc_model_path = "model.pth" if args.use_best else "model_last.pth"
+        mc_model_path = os.path.join(args.output, prev_mc_experiment, mc_model_path)
+        print("Loading MC model in {} ...".format(mc_model_path))
+        missing, unexpected = model.load_state_dict(torch.load(mc_model_path))
+        assert len(missing) + len(unexpected) == 0
         model.eval()
         mc_dataset.choose_new_points(heuristic="mc", model=model)
         experiment = experiment_prefix + "_mc_" + str(i)
@@ -255,6 +206,11 @@ def run_experiments(args):
         #Perform gt active learning
         prev_gt_experiment = experiment_prefix + "_gt_" + str(i - 1)
         model = get_model(args, prev_gt_experiment, mc_drop=False)
+        gt_model_path = "model.pth" if args.use_best else "model_last.pth"
+        gt_model_path = os.path.join(args.output, prev_gt_experiment, gt_model_path)
+        print("Loading GT model in {} ...".format(gt_model_path))
+        missing, unexpected = model.load_state_dict(torch.load(gt_model_path))
+        assert len(missing) + len(unexpected) == 0
         model.eval()
         gt_dataset.choose_new_points(heuristic="gt", model=model)
         experiment = experiment_prefix + "_gt_" + str(i)
@@ -262,9 +218,6 @@ def run_experiments(args):
         gt_pixel_miou = evaluate_pixel_miou(args, experiment)
 
         #perform random choice
-        prev_rand_experiment = experiment_prefix + "_rand_" + str(i - 1)
-        model = get_model(args, prev_rand_experiment, mc_drop=False)
-        model.eval()
         random_dataset.choose_new_points(heuristic="random")
         experiment = experiment_prefix + "_rand_" + str(i)
         train(args, random_dataset, val_dataset, experiment)
@@ -298,6 +251,7 @@ if __name__ == '__main__':
     parser.add_argument('--df', type=float, help='decay factor', default=0.7)
     parser.add_argument('--num_scenes', type=int, help='number of scenes in each step', default=30)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--use_best", action="store_true")
     parser.add_argument("--no_weighting", action="store_true", help="weight the classes")
     parser.add_argument('--no_bn', action="store_true", help="do not apply batch normalization in pointnet++")
     parser.add_argument('--no_xyz', action="store_true", help="do not apply coordinates as features in pointnet++")

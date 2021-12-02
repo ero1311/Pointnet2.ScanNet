@@ -175,20 +175,7 @@ def prep_visualization(mc_dataset, gt_dataset, random_dataset):
         for i in range(mc_rest.shape[0]):
             if mc_rest[i][0] > max_x_coord:
                 max_x_coord = mc_rest[i][0]
-            '''vertex.append(
-                [
-                    mc_rest[i][0],
-                    mc_rest[i][1],
-                    mc_rest[i][2]
-                ]
-            )
-            colors.append(
-                [
-                    200,
-                    200,
-                    200
-                ]
-            )'''
+
         max_x_coord += 1
         for i in range(gt_chosen.shape[0]):
             vertex.append(
@@ -205,21 +192,7 @@ def prep_visualization(mc_dataset, gt_dataset, random_dataset):
                     CONF.PALETTE[int(gt_chosen[i][-1])][2]
                 ]
             )
-        '''for i in range(gt_rest.shape[0]):
-            vertex.append(
-                [
-                    gt_rest[i][0] + max_x_coord,
-                    gt_rest[i][1],
-                    gt_rest[i][2]
-                ]
-            )
-            colors.append(
-                [
-                    200,
-                    200,
-                    200
-                ]
-            )'''
+
         for i in range(random_chosen.shape[0]):
             vertex.append(
                 [
@@ -235,21 +208,7 @@ def prep_visualization(mc_dataset, gt_dataset, random_dataset):
                     CONF.PALETTE[int(random_chosen[i][-1])][2]
                 ]
             )
-        '''for i in range(random_rest.shape[0]):
-            vertex.append(
-                [
-                    random_rest[i][0] + (2 * max_x_coord),
-                    random_rest[i][1],
-                    random_rest[i][2]
-                ]
-            )
-            colors.append(
-                [
-                    200,
-                    200,
-                    200
-                ]
-            )'''
+
         data[scene_id] = (vertex, colors)
     
     return data
