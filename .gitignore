@@ -20,6 +20,7 @@ preprocessing/label_point_clouds/
 outputs/
 active_outputs/
 active_outputs_pointwise/
+active_outputs_pointwise_tb_mesh_vis/
 logs/
 visualizations/
 

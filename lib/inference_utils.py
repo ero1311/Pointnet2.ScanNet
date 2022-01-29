@@ -150,10 +150,11 @@ def prep_visualization(mc_dataset, gt_dataset, random_dataset):
     data = {}
     for scene_id in scene_ids:
         mc_chosen, mc_rest = get_selected_and_not_selected(mc_dataset, scene_id)
-        gt_chosen, gt_rest = get_selected_and_not_selected(gt_dataset, scene_id)
-        random_chosen, random_rest = get_selected_and_not_selected(random_dataset, scene_id)
+        gt_chosen, _ = get_selected_and_not_selected(gt_dataset, scene_id)
+        random_chosen, _ = get_selected_and_not_selected(random_dataset, scene_id)
         vertex = []
         colors = []
+        normals = []
         max_x_coord = -np.inf
         for i in range(mc_chosen.shape[0]):
             if mc_chosen[i][0] > max_x_coord:
@@ -172,6 +173,15 @@ def prep_visualization(mc_dataset, gt_dataset, random_dataset):
                     CONF.PALETTE[int(mc_chosen[i][-1])][2]
                 ]
             )
+            normals.append(
+                [
+                    mc_chosen[i][6],
+                    mc_chosen[i][7],
+                    mc_chosen[i][8]
+                ]
+            )
+
+
         for i in range(mc_rest.shape[0]):
             if mc_rest[i][0] > max_x_coord:
                 max_x_coord = mc_rest[i][0]
@@ -192,6 +202,13 @@ def prep_visualization(mc_dataset, gt_dataset, random_dataset):
                     CONF.PALETTE[int(gt_chosen[i][-1])][2]
                 ]
             )
+            normals.append(
+                [
+                    gt_chosen[i][6],
+                    gt_chosen[i][7],
+                    gt_chosen[i][8]
+                ]
+            )
 
         for i in range(random_chosen.shape[0]):
             vertex.append(
@@ -208,7 +225,14 @@ def prep_visualization(mc_dataset, gt_dataset, random_dataset):
                     CONF.PALETTE[int(random_chosen[i][-1])][2]
                 ]
             )
+            normals.append(
+                [
+                    random_chosen[i][6],
+                    random_chosen[i][7],
+                    random_chosen[i][8]
+                ]
+            )
 
-        data[scene_id] = (vertex, colors)
+        data[scene_id] = (vertex, colors, normals)
     
     return data
