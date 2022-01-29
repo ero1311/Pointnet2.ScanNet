@@ -3,7 +3,9 @@ import sys
 import json
 import argparse
 import importlib
+from numpy.core.fromnumeric import nonzero
 import torch
+from torch.functional import norm
 import torch.optim as optim
 import numpy as np
 from torch.utils.data import DataLoader
@@ -20,6 +22,7 @@ from lib.loss import WeightedCrossEntropyLoss
 from lib.config import CONF
 from lib.inference_utils import prep_visualization, filter_points
 from eval import filter_points, eval_wholescene
+from open3d.visualization.tensorboard_plugin import summary
 
 
 def get_num_params(model):
@@ -33,7 +36,7 @@ def get_solver(args, dataset, dataloader, stamp, weight):
     num_params = get_num_params(model)
     criterion = WeightedCrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
-    solver = Solver(model, dataset, dataloader, criterion, optimizer, args.batch_size, stamp, args.use_wholescene, args.ds, args.df)
+    solver = Solver(model, dataset, dataloader, criterion, optimizer, args.batch_size, stamp, args.use_wholescene, args.ds, args.df, args.patience)
 
     return solver, num_params
 
@@ -130,14 +133,16 @@ def evaluate_pixel_miou(args, stamp):
 def run_experiments(args):
     rand_gen = np.random.default_rng(args.seed)
     all_scenes_pool = get_scene_list(CONF.SCANNETV2_TRAIN)
-    val_scene_list = get_scene_list(CONF.SCANNETV2_VAL) #rand_gen.choice(all_scenes_pool, size=20, replace=False)
+    val_scene_list = get_scene_list(CONF.SCANNETV2_TEST) #rand_gen.choice(all_scenes_pool, size=20, replace=False)
     train_scenes_pool = list(set(all_scenes_pool).difference(set(val_scene_list)))
     print("Train Pool is of size {}".format(len(train_scenes_pool)))
     initial_scenes_list = list(rand_gen.choice(train_scenes_pool, size=args.num_scenes, replace=False))
-    random_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, points_increment=args.points_increment)
-    mc_dataset = deepcopy(random_dataset)
-    gt_dataset = deepcopy(random_dataset)
-    val_dataset = ScannetDataset("val", initial_scenes_list, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
+    random_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, points_increment=args.points_increment, heuristic="random")
+    mc_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, points_increment=args.points_increment, heuristic="mc")
+    gt_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, points_increment=args.points_increment, heuristic="gt")
+    mc_dataset._copy_points(random_dataset)
+    gt_dataset._copy_points(random_dataset)
+    val_dataset = ScannetDataset("val", val_scene_list, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
     out_dir = Path(args.output)
     experiments = list(out_dir.glob('experiment*'))
     if len(experiments) == 0:
@@ -176,32 +181,19 @@ def run_experiments(args):
             print("MC: ", mc_scene_data.shape, mc_filtered.shape)
             print("RANDOM: ", random_scene_data.shape, random_filtered.shape)
             
-        for scene_id, (vertex, colors) in data.items():
-            vertex = torch.as_tensor(vertex, dtype=torch.float).unsqueeze(0)
-            colors = torch.as_tensor(colors, dtype=torch.uint8).unsqueeze(0)
-            logger.add_mesh(
-                '{}/{}'.format(experiment_prefix, scene_id), 
-                vertex, 
-                colors, 
-                config_dict={
-                    "camera": {"cls": "PerspectiveCamera", "fov": 75}, 
-                    "material": {"cls": "MeshBasicMaterial", "reflectivity": 1}
-                }, 
-                global_step=i * args.points_increment
+        for scene_id, (vertex, colors, normals) in data.items():
+            vertex = torch.as_tensor(vertex, dtype=torch.float)#.unsqueeze(0)
+            colors = torch.as_tensor(colors, dtype=torch.uint8)#.unsqueeze(0)
+            normals = torch.as_tensor(normals, dtype=torch.float)#.unsqueeze(0) 
+            logger.add_3d(
+                "{}/{}".format(experiment_prefix, scene_id),
+                {
+                    "vertex_positions": vertex,
+                    "vertex_colors": colors,
+                    "vertex_normals": normals
+                },
+                i * args.points_increment
             )
-        #Perform MC active learning
-        prev_mc_experiment = experiment_prefix + "_mc_" + str(i - 1)
-        model = get_model(args, prev_mc_experiment, mc_drop=True)
-        mc_model_path = "model.pth" if args.use_best else "model_last.pth"
-        mc_model_path = os.path.join(args.output, prev_mc_experiment, mc_model_path)
-        print("Loading MC model in {} ...".format(mc_model_path))
-        missing, unexpected = model.load_state_dict(torch.load(mc_model_path))
-        assert len(missing) + len(unexpected) == 0
-        model.eval()
-        mc_dataset.choose_new_points(heuristic="mc", model=model)
-        experiment = experiment_prefix + "_mc_" + str(i)
-        train(args, mc_dataset, val_dataset, experiment)
-        mc_pixel_miou = evaluate_pixel_miou(args, experiment)
 
         #Perform gt active learning
         prev_gt_experiment = experiment_prefix + "_gt_" + str(i - 1)
@@ -212,13 +204,27 @@ def run_experiments(args):
         missing, unexpected = model.load_state_dict(torch.load(gt_model_path))
         assert len(missing) + len(unexpected) == 0
         model.eval()
-        gt_dataset.choose_new_points(heuristic="gt", model=model)
+        gt_dataset.choose_new_points(model=model)
         experiment = experiment_prefix + "_gt_" + str(i)
         train(args, gt_dataset, val_dataset, experiment)
         gt_pixel_miou = evaluate_pixel_miou(args, experiment)
 
+        #Perform MC active learning
+        prev_mc_experiment = experiment_prefix + "_mc_" + str(i - 1)
+        model = get_model(args, prev_mc_experiment, mc_drop=True)
+        mc_model_path = "model.pth" if args.use_best else "model_last.pth"
+        mc_model_path = os.path.join(args.output, prev_mc_experiment, mc_model_path)
+        print("Loading MC model in {} ...".format(mc_model_path))
+        missing, unexpected = model.load_state_dict(torch.load(mc_model_path))
+        assert len(missing) + len(unexpected) == 0
+        model.eval()
+        mc_dataset.choose_new_points(model=model)
+        experiment = experiment_prefix + "_mc_" + str(i)
+        train(args, mc_dataset, val_dataset, experiment)
+        mc_pixel_miou = evaluate_pixel_miou(args, experiment)
+
         #perform random choice
-        random_dataset.choose_new_points(heuristic="random")
+        random_dataset.choose_new_points()
         experiment = experiment_prefix + "_rand_" + str(i)
         train(args, random_dataset, val_dataset, experiment)
         random_pixel_miou = evaluate_pixel_miou(args, experiment)
@@ -238,6 +244,7 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=str, help='Output directory', default='active_outputs_pointwise')
     parser.add_argument('--gpu', type=str, help='gpu', default='0')
     parser.add_argument('--batch_size', type=int, help='batch size', default=32)
+    parser.add_argument('--patience', type=int, help='batch size', default=10)
     parser.add_argument('--points_increment', type=int, help='points to add in each active cycle', default=100)
     parser.add_argument('--n_active_iters', type=int, help='number of active learning cycles', default=10)
     parser.add_argument('--n_points_train', type=int, help='number of active learning cycles', default=8192)

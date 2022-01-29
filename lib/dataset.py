@@ -3,8 +3,10 @@ import os
 import sys
 import time
 import h5py
+import random
 from numpy.core.numeric import True_
 from numpy.core.shape_base import block
+from numpy.lib.index_tricks import _ix__dispatcher
 import torch
 import numpy as np
 import multiprocessing as mp
@@ -12,10 +14,14 @@ from torch._C import _tracer_warn_use_python
 from tqdm import tqdm
 from prefetch_generator import background
 from collections import OrderedDict
+import importlib
 
 sys.path.append(".")
 from lib.config import CONF
 from lib.inference_utils import mc_forward, forward, filter_points, eval_one_batch
+#from pointnet2.pointnet2_utils import furthest_point_sample
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../pointnet2/'))
+sample_utils = importlib.import_module("pointnet2_utils")
 
 class ScannetDataset():
     def __init__(self, phase, scene_list, num_classes=21, npoints=8192, is_weighting=True, use_multiview=False, use_color=False, use_normal=False):
@@ -370,7 +376,7 @@ class ScannetDatasetWholeScene():
         return len(self.scene_points_list)
 
 class ScannetDatasetActiveLearning():
-    def __init__(self, phase, scene_list, num_classes=21, npoints=8192, is_weighting=True, use_multiview=False, use_color=False, use_normal=False, points_increment=100):
+    def __init__(self, phase, scene_list, num_classes=21, npoints=8192, is_weighting=True, use_multiview=False, use_color=False, use_normal=False, points_increment=100, heuristic="random"):
         self.phase = phase
         assert phase in ["train", "val", "test"]
         self.scene_list = scene_list
@@ -381,6 +387,7 @@ class ScannetDatasetActiveLearning():
         self.use_multiview = use_multiview
         self.use_color = use_color
         self.use_normal = use_normal
+        self.heuristic = heuristic
         self.chunk_data = {} # init in generate_chunks()
 
         self._init_data()
@@ -455,7 +462,13 @@ class ScannetDatasetActiveLearning():
             self.labelweights = 1/np.log(1.2+labelweights)
         else:
             self.labelweights = np.ones(self.num_classes)
-    
+        print("PREPARE WEIGHTS: ", self.labelweights.shape)
+
+    def _copy_points(self, other_dataset):
+        for scene_id in self.scene_list:
+            self.selected_mask[scene_id] = other_dataset.selected_mask[scene_id].copy()
+        self._prepare_weights()
+
     @background()
     def __getitem__(self, index):
         start = time.time()
@@ -614,9 +627,9 @@ class ScannetDatasetActiveLearning():
 
             coordmax = np.max(scene, axis=0)[:3]
             coordmin = np.min(scene, axis=0)[:3]
-            
-            for _ in range(5):
-                curcenter = scene[np.random.choice(len(semantic), 1)[0],:3]
+            num_points_selected = 0
+            curcenter = scene[np.random.choice(len(semantic), 1)[0],:3]
+            while True:
                 curmin = curcenter-[0.75,0.75,1.5]
                 curmax = curcenter+[0.75,0.75,1.5]
                 curmin[2] = coordmin[2]
@@ -629,14 +642,14 @@ class ScannetDatasetActiveLearning():
 
                 if len(cur_semantic_seg)==0:
                     continue
-
-                mask = np.sum((cur_point_set[:, :3]>=(curmin-0.01))*(cur_point_set[:, :3]<=(curmax+0.01)),axis=1)==3
-                vidx = np.ceil((cur_point_set[mask,:3]-curmin)/(curmax-curmin)*[31.0,31.0,62.0])
-                vidx = np.unique(vidx[:,0]*31.0*62.0+vidx[:,1]*62.0+vidx[:,2])
-                isvalid = np.sum(cur_semantic_seg>0)/len(cur_semantic_seg)>=0.7 and len(vidx)/31.0/31.0/62.0>=0.02
-
-                if isvalid:
+                
+                if curchoice.sum() > num_points_selected:
+                    curcenter = cur_point_set[:, :3].mean(axis=0)
+                    num_points_selected = curchoice.sum()
+                else:
                     break
+                
+
             
             # store chunk
             if self.use_multiview:
@@ -646,22 +659,20 @@ class ScannetDatasetActiveLearning():
 
             choices = np.random.choice(chunk.shape[0], self.npoints, replace=True)
             chunk = chunk[choices]
-            self.chunk_data[scene_id] = chunk
+            self.chunk_data[scene_id] = chunk.copy()
             
         print("done!\n")
 
-    def choose_new_points(self, heuristic="random", model=None, mc_iters=20):
+    def choose_new_points(self, model=None, mc_iters=20):
         '''
         Choose new points to be annotated and added to the dataset
 
-        :param heuristic: heuristic according to which new points are chosen, one from (mc, random, gt). Default: "random"
-        :type heuristic: str
         :param model: model to use in case of mc and gt. Default: None
         :type model: torch.nn.Module
         :param mc_iters: number of Monte Carlo dropout iterations to perform. Default: 20
         :type mc_iters: int
         '''
-        print("Choosing new points with {} heuristic ...".format(heuristic))
+
         xlength = 1.5
         ylength = 1.5
         for scene_id in tqdm(self.scene_list):
@@ -686,6 +697,7 @@ class ScannetDatasetActiveLearning():
                 multiview_features = self.multiview_data[scene_id]
                 point_set_ini = np.concatenate([point_set_ini, multiview_features], axis=1)
             point_cubes = []
+            npoints = 8192
             for i in range(nsubvolume_x):
                 for j in range(nsubvolume_y):
                     curmin = coordmin+[i*xlength, j*ylength, 0]
@@ -694,20 +706,21 @@ class ScannetDatasetActiveLearning():
                     mask = np.logical_and(mask, np.logical_not(self.selected_mask[scene_id]))
                     cur_point_set = point_set_ini[mask,:]
                     cur_semantic_seg = self.scene_data[scene_id][mask, 10].astype(np.int32)
-                    scores = np.zeros_like(cur_semantic_seg)
+                    scores = np.zeros(cur_semantic_seg.shape)
+                    block_weights = np.zeros(cur_semantic_seg.shape)
                     block_mask = mask.copy()
                     if len(cur_semantic_seg) == 0:
                         continue
 
-                    remainder = len(cur_semantic_seg) % self.npoints
-                    choice = np.random.choice(len(cur_semantic_seg), size = self.npoints - remainder, replace=True)
+                    remainder = len(cur_semantic_seg) % npoints
+                    choice = np.random.choice(len(cur_semantic_seg), size = npoints - remainder, replace=True)
                     cur_point_set = np.concatenate([cur_point_set, cur_point_set[choice].copy()], axis=0)
                     cur_semantic_seg = np.concatenate([cur_semantic_seg, cur_semantic_seg[choice].copy()], axis=0)
-                    cur_point_sets = np.split(cur_point_set, len(cur_semantic_seg) // self.npoints, axis=0)
-                    cur_semantic_segs = np.split(cur_semantic_seg, len(cur_semantic_seg) // self.npoints, axis=0)
+                    cur_point_sets = np.split(cur_point_set, len(cur_semantic_seg) // npoints, axis=0)
+                    cur_semantic_segs = np.split(cur_semantic_seg, len(cur_semantic_seg) // npoints, axis=0)
                     for k in range(len(cur_point_sets)):
                         point_set = cur_point_sets[k] # Nx3
-                        mask_start, mask_end = k * self.npoints, (k + 1) * self.npoints
+                        mask_start, mask_end = k * npoints, (k + 1) * npoints
                         semantic_seg = cur_semantic_segs[k] # N
                         sample_weight = self.labelweights[semantic_seg]
                         with torch.no_grad():
@@ -721,7 +734,7 @@ class ScannetDatasetActiveLearning():
                             feats = point_set_t[:, :, 3:]
                             coords, feats, targets, weights = coords.unsqueeze(0), feats.unsqueeze(0), targets.unsqueeze(0), weights.unsqueeze(0)
                             coords, feats, targets, weights = coords.cuda(), feats.cuda(), targets.cuda(), weights.cuda()
-                            if heuristic == "gt":
+                            if self.heuristic == "gt":
                                 preds = forward(1, model, coords, feats)
                                 coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
                                 preds = preds.squeeze(0).view(-1).cpu().numpy()
@@ -729,9 +742,11 @@ class ScannetDatasetActiveLearning():
                                 weights = weights.squeeze(0).view(-1).cpu().numpy()
                                 preds = preds[:len(mask[mask==True][mask_start:mask_end])]
                                 targets = targets[:len(mask[mask==True][mask_start:mask_end])]
-                                block_mask[block_mask==True][mask_start:mask_end] = preds != targets
+                                weights = weights[:len(mask[mask==True][mask_start:mask_end])]
+                                block_mask[mask==True][mask_start:mask_end] = preds != targets
                                 scores[mask_start:mask_end] = (preds != targets).astype(float)
-                            elif heuristic == "mc":
+                                block_weights[mask_start:mask_end] = weights.copy()
+                            elif self.heuristic == "mc":
                                 preds = mc_forward(1, model, coords, feats, mc_iters)
                                 coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
                                 preds = preds.view(-1, mc_iters).cpu().numpy()
@@ -743,24 +758,36 @@ class ScannetDatasetActiveLearning():
                                     p = np.sum(preds == c, axis=1, dtype=np.float32) / mc_iters
                                     scene_entropy = scene_entropy - (p * np.log2(p + 1e-12))
                                 scores[mask_start:mask_end] = scene_entropy.copy()
-                            elif heuristic == "random":
+                            elif self.heuristic == "random":
                                 block_mask[block_mask==True][mask_start:mask_end] = True
 
-                    if heuristic == "mc":
+                    if self.heuristic == "mc":
                         slice_mask = np.zeros(len(mask[mask==True]), dtype=np.bool)
                         idx = np.argsort(-scores)[:self.points_increment]
                         slice_mask[idx] = True
                         block_mask[block_mask==True] = slice_mask.copy()
-                        point_cubes.append((float(np.mean(scores[idx])), block_mask.copy()))
-                    else:
                         point_cubes.append((float(np.mean(scores)), block_mask.copy()))
+                    elif self.heuristic == "gt":
+                        slice_mask = np.zeros(len(mask[mask==True]), dtype=np.bool)
+                        block_weights *= scores
+                        mean_score = float(np.mean(block_weights))
+                        block_weights = block_weights / block_weights.sum()
+                        idx = np.flatnonzero(scores)
+                        if idx.shape[0] > self.points_increment:
+                            pts_choose = np.random.choice(block_weights.shape[0], size=self.points_increment, replace=False, p=block_weights)
+                            slice_mask[pts_choose] = True
+                        else:
+                            slice_mask[idx] = True
+                        block_mask[mask==True] = slice_mask.copy()
+                        point_cubes.append((mean_score, block_mask.copy()))
+                    else:
+                        point_cubes.append((float(np.sum(scores)), block_mask.copy()))
 
-            if heuristic != "random":
+            if self.heuristic != "random":
                 point_cubes_mIoU_sorted = sorted(point_cubes, key=lambda x: x[0], reverse=True)
             else:
                 # instead of sorting just shuffle the points in case of the random
-                idx = np.random.choice(len(point_cubes), size=len(point_cubes), replace=False)
-                point_cubes_mIoU_sorted = np.array(point_cubes)[idx]
+                point_cubes_mIoU_sorted = random.sample(point_cubes, k=len(point_cubes))
             current_choice = self.selected_mask[scene_id].copy()
             total_num_points = self.points_increment
             for mIoU, point_mask in point_cubes_mIoU_sorted:
@@ -778,7 +805,8 @@ class ScannetDatasetActiveLearning():
                     current_choice = np.logical_xor(current_choice, cube_points)
                     total_num_points -= cube_points[cube_points==True].shape[0]
             self.selected_mask[scene_id] = current_choice.copy()
-        self._prepare_weights()
+            self._prepare_weights()
+        print("HEURISTIC: ", self.heuristic, "WEIGHTS: ", self.labelweights)
 
 def collate_random(data):
     '''

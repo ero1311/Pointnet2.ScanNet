@@ -58,7 +58,7 @@ BEST_REPORT_TEMPLATE = """
 """
 
 class Solver():
-    def __init__(self, model, dataset, dataloader, criterion, optimizer, batch_size, stamp, is_wholescene=True, decay_step=10, decay_factor=0.7):
+    def __init__(self, model, dataset, dataloader, criterion, optimizer, batch_size, stamp, is_wholescene=True, decay_step=10, decay_factor=0.7, patience=10):
         self.epoch = 0                    # set in __call__
         self.verbose = 0                  # set in __call__
         
@@ -70,6 +70,8 @@ class Solver():
         self.batch_size = batch_size
         self.stamp = stamp
         self.is_wholescene = is_wholescene
+        self.max_patience = patience
+        self.patience = 0
         self.scheduler = StepLR(optimizer, step_size=decay_step, gamma=decay_factor)
         self.best = {
             "epoch": 0,
@@ -81,7 +83,7 @@ class Solver():
             "point_miou": -float("inf"),
             "voxel_miou": -float("inf"),
         }
-
+        self.best_loss = float("inf")
         # log
         # contains all necessary info for all phases
         self.log = {phase: {} for phase in ["train", "val"]}
@@ -132,6 +134,11 @@ class Solver():
 
             # scheduler
             self.scheduler.step()
+
+            #patience
+            if self.patience == self.max_patience:
+                print("Early Stopping ...")
+                break
 
         # print best
         self._best_report()
@@ -304,7 +311,7 @@ class Solver():
             self.log[phase][epoch_id]["voxel_miou"].append(self._running_log["voxel_miou"])
 
         # check best
-        cur_criterion = "voxel_miou"
+        cur_criterion = "point_miou"
         cur_best = np.mean(self.log[phase][epoch_id][cur_criterion])
         if cur_best > self.best[cur_criterion]:
             print("best {} achieved: {}".format(cur_criterion, cur_best))
@@ -323,6 +330,13 @@ class Solver():
             print("saving models...\n")
             model_root = os.path.join(CONF.OUTPUT_ROOT, self.stamp)
             torch.save(self.model.state_dict(), os.path.join(model_root, "model.pth"))
+        
+        curr_loss = np.mean(self.log[phase][epoch_id]["loss"])
+        if curr_loss < self.best_loss:
+            self.best_loss = curr_loss
+            self.patience = 0
+        else:
+            self.patience += 1
 
     def _eval(self, coords, preds, targets, weights, is_wholescene):
         if is_wholescene:
