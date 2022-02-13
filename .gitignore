@@ -13,14 +13,15 @@ pointnet2/dist
 pointnet2/pointnet2.egg-info
 
 # prep data
-preprocessing/scannet_scenes
+preprocessing/scannet_scenes*
+preprocessing/scannet_oversegs*
 preprocessing/label_point_clouds/
 
 # outputs
 outputs/
 active_outputs/
+active_outputs_overseg/
 active_outputs_pointwise/
-active_outputs_pointwise_tb_mesh_vis/
 logs/
 visualizations/
 

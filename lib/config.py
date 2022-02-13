@@ -25,8 +25,9 @@ CONF.SCENE_NAMES = sorted(os.listdir(CONF.SCANNET_DIR))
 
 CONF.PREP = os.path.join(CONF.ROOT, "preprocessing")
 CONF.PREP_SCANS = os.path.join(CONF.PREP, "scannet_scenes")
+CONF.PREP_OVERSEGS = os.path.join(CONF.PREP, "scannet_oversegs")
 CONF.SCAN_LABELS = os.path.join(CONF.PREP, "label_point_clouds")
-CONF.OUTPUT_ROOT = os.path.join(CONF.ROOT, "active_outputs_pointwise")
+CONF.OUTPUT_ROOT = os.path.join(CONF.ROOT, "active_outputs_overseg")
 CONF.ENET_WEIGHTS = os.path.join(CONF.ROOT, "data/scannetv2_enet.pth")
 CONF.MULTIVIEW = os.path.join(CONF.PREP_SCANS, "enet_feats.hdf5")
 

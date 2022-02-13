@@ -47,7 +47,7 @@ class ScannetDataset():
             multiview_database = h5py.File(CONF.MULTIVIEW, "r", libver="latest")
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
-            label = scene_data[:, 10]
+            label = scene_data[:, 11]
 
             # append
             scene_points_list.append(scene_data)
@@ -80,7 +80,7 @@ class ScannetDataset():
         point_set = scene_data[:, :3] # include xyz by default
         rgb = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
         normal = scene_data[:, 6:9]
-        label = scene_data[:, 10].astype(np.int32)
+        label = scene_data[:, 11].astype(np.int32)
         if self.use_multiview:
             feature = scene_data[:, 11:]
             point_set = np.concatenate([point_set, feature], axis=1)
@@ -221,7 +221,7 @@ class ScannetDataset():
         print("generate new chunks for {}...".format(self.phase))
         for scene_id in tqdm(self.scene_list):
             scene = self.scene_data[scene_id]
-            semantic = scene[:, 10].astype(np.int32)
+            semantic = scene[:, 11].astype(np.int32)
             if self.use_multiview:
                 feature = self.multiview_data[scene_id]
 
@@ -285,7 +285,7 @@ class ScannetDatasetWholeScene():
 
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
-            label = scene_data[:, 10].astype(np.int32)
+            label = scene_data[:, 11].astype(np.int32)
             self.scene_points_list.append(scene_data)
             self.semantic_labels_list.append(label)
 
@@ -376,12 +376,11 @@ class ScannetDatasetWholeScene():
         return len(self.scene_points_list)
 
 class ScannetDatasetActiveLearning():
-    def __init__(self, phase, scene_list, num_classes=21, npoints=8192, is_weighting=True, use_multiview=False, use_color=False, use_normal=False, points_increment=100, heuristic="random"):
+    def __init__(self, phase, scene_list, num_classes=21, npoints=8192, is_weighting=True, use_multiview=False, use_color=False, use_normal=False, heuristic="random"):
         self.phase = phase
         assert phase in ["train", "val", "test"]
         self.scene_list = scene_list
         self.num_classes = num_classes
-        self.points_increment = points_increment
         self.npoints = npoints
         self.is_weighting = is_weighting
         self.use_multiview = use_multiview
@@ -401,59 +400,17 @@ class ScannetDatasetActiveLearning():
             multiview_database = h5py.File(CONF.MULTIVIEW, "r", libver="latest")
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
-            label = scene_data[:, 10]
-            #choose initial 100 points for each scene
-
-            coordmax = np.max(scene_data, axis=0)[:3]
-            coordmin = np.min(scene_data, axis=0)[:3]
-            sample_iter = 1
-            while True:
-                curcenter = scene_data[np.random.choice(len(label), 1)[0],:3]
-                curmin = curcenter-[0.75,0.75,1.5]
-                curmax = curcenter+[0.75,0.75,1.5]
-                curmin[2] = coordmin[2]
-                curmax[2] = coordmax[2]
-                curchoice = np.sum((scene_data[:, :3]>=(curmin-0.2))*(scene_data[:, :3]<=(curmax+0.2)),axis=1)==3
-                cur_point_set = scene_data[curchoice]
-                cur_semantic_seg = label[curchoice]
-                if self.use_multiview:
-                    cur_feature = multiview_database[curchoice]
-
-                if len(cur_semantic_seg)==0:
-                    continue
-
-                mask = np.sum((cur_point_set[:, :3]>=(curmin-0.01))*(cur_point_set[:, :3]<=(curmax+0.01)),axis=1)==3
-                vidx = np.ceil((cur_point_set[mask,:3]-curmin)/(curmax-curmin)*[31.0,31.0,62.0])
-                vidx = np.unique(vidx[:,0]*31.0*62.0+vidx[:,1]*62.0+vidx[:,2])
-                isvalid = np.sum(cur_semantic_seg>0)/len(cur_semantic_seg)>=0.7 and len(vidx)/31.0/31.0/62.0>=0.02
-
-                if (isvalid or sample_iter > 5) and cur_point_set.shape[0] >= self.points_increment:
-                    break
-                    
-                sample_iter += 1
-            
-            if self.use_multiview:
-                chunk = np.concatenate([cur_point_set, cur_feature], axis=1)
-            else:
-                chunk = cur_point_set
-            # append
-            choices = np.random.choice(chunk.shape[0], self.points_increment, replace=False)
-            selection_mask = np.zeros(chunk.shape[0], dtype=np.bool)
-            selection_mask[choices] = True
-            curchoice[curchoice==True] = selection_mask.copy()
+            selected_segment = np.random.choice(np.unique(scene_data[:, 9]), size=1)
+            curchoice = (scene_data[:, 9] == selected_segment)
             self.scene_data[scene_id] = scene_data
             self.selected_mask[scene_id] = curchoice.copy()
-
-            if self.use_multiview:
-                feature = multiview_database.get(scene_id)[()]
-                self.multiview_data[scene_id] = feature
 
     def _prepare_weights(self):
         if self.is_weighting:
             labelweights = np.zeros(self.num_classes)
             semantic_labels_list = []
             for scene_id in self.scene_list:
-                semantic_labels_list.append(self.scene_data[scene_id][self.selected_mask[scene_id]][:, 10])
+                semantic_labels_list.append(self.scene_data[scene_id][self.selected_mask[scene_id]][:, 11])
             for seg in semantic_labels_list:
                 tmp,_ = np.histogram(seg,range(self.num_classes + 1))
                 labelweights += tmp
@@ -480,9 +437,9 @@ class ScannetDatasetActiveLearning():
         point_set = scene_data[:, :3] # include xyz by default
         rgb = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
         normal = scene_data[:, 6:9]
-        label = scene_data[:, 10].astype(np.int32)
+        label = scene_data[:, 11].astype(np.int32)
         if self.use_multiview:
-            feature = scene_data[:, 11:]
+            feature = scene_data[:, 12:]
             point_set = np.concatenate([point_set, feature], axis=1)
         
         if self.use_color:
@@ -621,7 +578,7 @@ class ScannetDatasetActiveLearning():
         print("generate new chunks for {}...".format(self.phase))
         for scene_id in tqdm(self.scene_list):
             scene = self.scene_data[scene_id][self.selected_mask[scene_id]]
-            semantic = scene[:, 10].astype(np.int32)
+            semantic = scene[:, 11].astype(np.int32)
             if self.use_multiview:
                 feature = self.multiview_data[scene_id]
 
@@ -682,7 +639,7 @@ class ScannetDatasetActiveLearning():
             coordmin = scene_data[:, :3].min(axis=0)
             nsubvolume_x = np.ceil((coordmax[0]-coordmin[0])/xlength).astype(np.int32)
             nsubvolume_y = np.ceil((coordmax[1]-coordmin[1])/ylength).astype(np.int32)
-                
+
             point_set_ini = self.scene_data[scene_id][:, :3]
             color = self.scene_data[scene_id][:, 3:6] / 255.
             normal = self.scene_data[scene_id][:, 6:9]
@@ -696,115 +653,91 @@ class ScannetDatasetActiveLearning():
             if self.use_multiview:
                 multiview_features = self.multiview_data[scene_id]
                 point_set_ini = np.concatenate([point_set_ini, multiview_features], axis=1)
-            point_cubes = []
-            npoints = 8192
-            for i in range(nsubvolume_x):
-                for j in range(nsubvolume_y):
-                    curmin = coordmin+[i*xlength, j*ylength, 0]
-                    curmax = coordmin+[(i+1)*xlength, (j+1)*ylength, coordmax[2]-coordmin[2]]
-                    mask = np.sum((point_set_ini[:, :3]>=(curmin-0.01))*(point_set_ini[:, :3]<=(curmax+0.01)), axis=1)==3
-                    mask = np.logical_and(mask, np.logical_not(self.selected_mask[scene_id]))
-                    cur_point_set = point_set_ini[mask,:]
-                    cur_semantic_seg = self.scene_data[scene_id][mask, 10].astype(np.int32)
-                    scores = np.zeros(cur_semantic_seg.shape)
-                    block_weights = np.zeros(cur_semantic_seg.shape)
-                    block_mask = mask.copy()
-                    if len(cur_semantic_seg) == 0:
-                        continue
 
-                    remainder = len(cur_semantic_seg) % npoints
-                    choice = np.random.choice(len(cur_semantic_seg), size = npoints - remainder, replace=True)
-                    cur_point_set = np.concatenate([cur_point_set, cur_point_set[choice].copy()], axis=0)
-                    cur_semantic_seg = np.concatenate([cur_semantic_seg, cur_semantic_seg[choice].copy()], axis=0)
-                    cur_point_sets = np.split(cur_point_set, len(cur_semantic_seg) // npoints, axis=0)
-                    cur_semantic_segs = np.split(cur_semantic_seg, len(cur_semantic_seg) // npoints, axis=0)
-                    for k in range(len(cur_point_sets)):
-                        point_set = cur_point_sets[k] # Nx3
-                        mask_start, mask_end = k * npoints, (k + 1) * npoints
-                        semantic_seg = cur_semantic_segs[k] # N
-                        sample_weight = self.labelweights[semantic_seg]
-                        with torch.no_grad():
-                            point_set = np.expand_dims(point_set, 0) # 1xNx3
-                            semantic_seg = np.expand_dims(semantic_seg, 0) # 1x1xN
-                            sample_weight = np.expand_dims(sample_weight, 0) # 1x1xN
-                            point_set_t = torch.FloatTensor(point_set)
-                            targets = torch.LongTensor(semantic_seg)
-                            weights = torch.FloatTensor(sample_weight)
-                            coords = point_set_t[:, :, :3]
-                            feats = point_set_t[:, :, 3:]
-                            coords, feats, targets, weights = coords.unsqueeze(0), feats.unsqueeze(0), targets.unsqueeze(0), weights.unsqueeze(0)
-                            coords, feats, targets, weights = coords.cuda(), feats.cuda(), targets.cuda(), weights.cuda()
-                            if self.heuristic == "gt":
-                                preds = forward(1, model, coords, feats)
-                                coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
-                                preds = preds.squeeze(0).view(-1).cpu().numpy()
-                                targets = targets.squeeze(0).view(-1).cpu().numpy()
-                                weights = weights.squeeze(0).view(-1).cpu().numpy()
-                                preds = preds[:len(mask[mask==True][mask_start:mask_end])]
-                                targets = targets[:len(mask[mask==True][mask_start:mask_end])]
-                                weights = weights[:len(mask[mask==True][mask_start:mask_end])]
-                                block_mask[mask==True][mask_start:mask_end] = preds != targets
-                                scores[mask_start:mask_end] = (preds != targets).astype(float)
-                                block_weights[mask_start:mask_end] = weights.copy()
-                            elif self.heuristic == "mc":
-                                preds = mc_forward(1, model, coords, feats, mc_iters)
-                                coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
-                                preds = preds.view(-1, mc_iters).cpu().numpy()
-                                targets = targets.squeeze(0).view(-1).cpu().numpy()
-                                weights = weights.squeeze(0).view(-1).cpu().numpy()
-                                preds = preds[:len(mask[mask==True][mask_start:mask_end])]
-                                scene_entropy = np.zeros(preds.shape[0])
-                                for c in range(CONF.NUM_CLASSES):
-                                    p = np.sum(preds == c, axis=1, dtype=np.float32) / mc_iters
-                                    scene_entropy = scene_entropy - (p * np.log2(p + 1e-12))
-                                scores[mask_start:mask_end] = scene_entropy.copy()
-                            elif self.heuristic == "random":
-                                block_mask[block_mask==True][mask_start:mask_end] = True
-
-                    if self.heuristic == "mc":
-                        slice_mask = np.zeros(len(mask[mask==True]), dtype=np.bool)
-                        idx = np.argsort(-scores)[:self.points_increment]
-                        slice_mask[idx] = True
-                        block_mask[block_mask==True] = slice_mask.copy()
-                        point_cubes.append((float(np.mean(scores)), block_mask.copy()))
-                    elif self.heuristic == "gt":
-                        slice_mask = np.zeros(len(mask[mask==True]), dtype=np.bool)
-                        block_weights *= scores
-                        mean_score = float(np.mean(block_weights))
-                        block_weights = block_weights / block_weights.sum()
-                        idx = np.flatnonzero(scores)
-                        if idx.shape[0] > self.points_increment:
-                            pts_choose = np.random.choice(block_weights.shape[0], size=self.points_increment, replace=False, p=block_weights)
-                            slice_mask[pts_choose] = True
-                        else:
-                            slice_mask[idx] = True
-                        block_mask[mask==True] = slice_mask.copy()
-                        point_cubes.append((mean_score, block_mask.copy()))
-                    else:
-                        point_cubes.append((float(np.sum(scores)), block_mask.copy()))
-
-            if self.heuristic != "random":
-                point_cubes_mIoU_sorted = sorted(point_cubes, key=lambda x: x[0], reverse=True)
+            if self.heuristic == 'random':
+                rand_seg_id = np.random.choice(np.unique(scene_data[:, 9]), size=1)
+                current_choice = (self.scene_data[scene_id][:, 9] == rand_seg_id)        
             else:
-                # instead of sorting just shuffle the points in case of the random
-                point_cubes_mIoU_sorted = random.sample(point_cubes, k=len(point_cubes))
-            current_choice = self.selected_mask[scene_id].copy()
-            total_num_points = self.points_increment
-            for mIoU, point_mask in point_cubes_mIoU_sorted:
-                if total_num_points <= 0:
-                    break
-                cube_points = np.logical_and(point_mask, np.logical_not(current_choice))
-                if cube_points.sum() >= total_num_points:
-                    choice = np.random.choice(cube_points[cube_points==True].shape[0], size=total_num_points, replace=False)
-                    selection_mask = np.zeros(len(cube_points[cube_points==True]), dtype=np.bool)
-                    selection_mask[choice] = True
-                    cube_points[cube_points==True] = selection_mask.copy()
-                    current_choice = np.logical_xor(current_choice, cube_points)
-                    break
-                else:
-                    current_choice = np.logical_xor(current_choice, cube_points)
-                    total_num_points -= cube_points[cube_points==True].shape[0]
-            self.selected_mask[scene_id] = current_choice.copy()
+                point_scores = np.zeros(self.scene_data[scene_id].shape[0])
+                point_weights = np.zeros_like(point_scores)
+                point_mask = np.zeros_like(self.selected_mask[scene_id], dtype=np.bool)
+                segment_scores = []
+                npoints = 8192
+
+                for i in range(nsubvolume_x):
+                    for j in range(nsubvolume_y):
+                        curmin = coordmin+[i*xlength, j*ylength, 0]
+                        curmax = coordmin+[(i+1)*xlength, (j+1)*ylength, coordmax[2]-coordmin[2]]
+                        mask = np.sum((point_set_ini[:, :3]>=(curmin-0.01))*(point_set_ini[:, :3]<=(curmax+0.01)), axis=1)==3
+                        mask = np.logical_and(mask, np.logical_not(point_mask))
+                        cur_point_set = point_set_ini[mask,:]
+                        cur_semantic_seg = self.scene_data[scene_id][mask, 11].astype(np.int32)
+                        scores = np.zeros(cur_semantic_seg.shape)
+                        block_weights = np.zeros(cur_semantic_seg.shape)
+                        block_mask = mask.copy()
+                        if len(cur_semantic_seg) == 0:
+                            continue
+
+                        remainder = len(cur_semantic_seg) % npoints
+                        choice = np.random.choice(len(cur_semantic_seg), size = npoints - remainder, replace=True)
+                        cur_point_set = np.concatenate([cur_point_set, cur_point_set[choice].copy()], axis=0)
+                        cur_semantic_seg = np.concatenate([cur_semantic_seg, cur_semantic_seg[choice].copy()], axis=0)
+                        cur_point_sets = np.split(cur_point_set, len(cur_semantic_seg) // npoints, axis=0)
+                        cur_semantic_segs = np.split(cur_semantic_seg, len(cur_semantic_seg) // npoints, axis=0)
+                        for k in range(len(cur_point_sets)):
+                            point_set = cur_point_sets[k] # Nx3
+                            mask_start, mask_end = k * npoints, (k + 1) * npoints
+                            semantic_seg = cur_semantic_segs[k] # N
+                            sample_weight = self.labelweights[semantic_seg]
+                            with torch.no_grad():
+                                point_set = np.expand_dims(point_set, 0) # 1xNx3
+                                semantic_seg = np.expand_dims(semantic_seg, 0) # 1x1xN
+                                sample_weight = np.expand_dims(sample_weight, 0) # 1x1xN
+                                point_set_t = torch.FloatTensor(point_set)
+                                targets = torch.LongTensor(semantic_seg)
+                                weights = torch.FloatTensor(sample_weight)
+                                coords = point_set_t[:, :, :3]
+                                feats = point_set_t[:, :, 3:]
+                                coords, feats, targets, weights = coords.unsqueeze(0), feats.unsqueeze(0), targets.unsqueeze(0), weights.unsqueeze(0)
+                                coords, feats, targets, weights = coords.cuda(), feats.cuda(), targets.cuda(), weights.cuda()
+                                if self.heuristic == "gt":
+                                    preds = forward(1, model, coords, feats)
+                                    coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
+                                    preds = preds.squeeze(0).view(-1).cpu().numpy()
+                                    targets = targets.squeeze(0).view(-1).cpu().numpy()
+                                    weights = weights.squeeze(0).view(-1).cpu().numpy()
+                                    preds = preds[:len(mask[mask==True][mask_start:mask_end])]
+                                    targets = targets[:len(mask[mask==True][mask_start:mask_end])]
+                                    weights = weights[:len(mask[mask==True][mask_start:mask_end])]
+                                    block_mask[mask==True][mask_start:mask_end] = preds != targets
+                                    scores[mask_start:mask_end] = (preds != targets).astype(float)
+                                    block_weights[mask_start:mask_end] = weights.copy()
+                                elif self.heuristic == "mc":
+                                    preds = mc_forward(1, model, coords, feats, mc_iters)
+                                    coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
+                                    preds = preds.view(-1, mc_iters).cpu().numpy()
+                                    targets = targets.squeeze(0).view(-1).cpu().numpy()
+                                    weights = weights.squeeze(0).view(-1).cpu().numpy()
+                                    preds = preds[:len(mask[mask==True][mask_start:mask_end])]
+                                    scene_entropy = np.zeros(preds.shape[0])
+                                    for c in range(CONF.NUM_CLASSES):
+                                        p = np.sum(preds == c, axis=1, dtype=np.float32) / mc_iters
+                                        scene_entropy = scene_entropy - (p * np.log2(p + 1e-12))
+                                    scores[mask_start:mask_end] = scene_entropy.copy()
+                        point_scores[mask] = scores.copy()
+                        point_weights[mask] = block_weights.copy()
+                        point_mask = np.logical_or(point_mask, mask)
+                        
+                point_weights *= point_scores
+                for i in np.unique(scene_data[:, 9]):
+                    mask = (self.scene_data[scene_id][:, 9] == i)
+                    if self.heuristic == "mc":
+                        segment_scores.append((float(np.sum(point_scores[mask])), i))
+                    elif self.heuristic == "gt":
+                        segment_scores.append((float(np.sum(point_weights[mask])), i))
+                segment_scores = sorted(segment_scores, key=lambda x: x[0], reverse=True)
+                current_choice = (self.scene_data[scene_id][:, 9] == segment_scores[0][1])
+            self.selected_mask[scene_id] = np.logical_or(self.selected_mask[scene_id], current_choice)          
             self._prepare_weights()
         print("HEURISTIC: ", self.heuristic, "WEIGHTS: ", self.labelweights)
 

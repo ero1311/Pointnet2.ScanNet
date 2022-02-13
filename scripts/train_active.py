@@ -137,9 +137,9 @@ def run_experiments(args):
     train_scenes_pool = list(set(all_scenes_pool).difference(set(val_scene_list)))
     print("Train Pool is of size {}".format(len(train_scenes_pool)))
     initial_scenes_list = list(rand_gen.choice(train_scenes_pool, size=args.num_scenes, replace=False))
-    random_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, points_increment=args.points_increment, heuristic="random")
-    mc_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, points_increment=args.points_increment, heuristic="mc")
-    gt_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, points_increment=args.points_increment, heuristic="gt")
+    random_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, heuristic="random")
+    mc_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, heuristic="mc")
+    gt_dataset = ScannetDatasetActiveLearning("train", initial_scenes_list, npoints=args.n_points_train, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview, heuristic="gt")
     mc_dataset._copy_points(random_dataset)
     gt_dataset._copy_points(random_dataset)
     val_dataset = ScannetDataset("val", val_scene_list, is_weighting=not args.no_weighting, use_color=args.use_color, use_normal=args.use_normal, use_multiview=args.use_multiview)
@@ -165,7 +165,7 @@ def run_experiments(args):
             "mc_dropout": rand_0_pixel_miou,
             "gt_choose": rand_0_pixel_miou
         },
-        args.points_increment
+        1
     )
     for i in range(1, args.n_active_iters):
         #pointcloud visualization
@@ -192,7 +192,7 @@ def run_experiments(args):
                     "vertex_colors": colors,
                     "vertex_normals": normals
                 },
-                i * args.points_increment
+                i
             )
 
         #Perform gt active learning
@@ -235,17 +235,16 @@ def run_experiments(args):
                 "mc_dropout": mc_pixel_miou,
                 "gt_choose": gt_pixel_miou
             },
-            (i + 1) * args.points_increment
+            (i + 1)
         )
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--output', type=str, help='Output directory', default='active_outputs_pointwise')
+    parser.add_argument('--output', type=str, help='Output directory', default='active_outputs_overseg')
     parser.add_argument('--gpu', type=str, help='gpu', default='0')
     parser.add_argument('--batch_size', type=int, help='batch size', default=32)
     parser.add_argument('--patience', type=int, help='batch size', default=10)
-    parser.add_argument('--points_increment', type=int, help='points to add in each active cycle', default=100)
     parser.add_argument('--n_active_iters', type=int, help='number of active learning cycles', default=10)
     parser.add_argument('--n_points_train', type=int, help='number of active learning cycles', default=8192)
     parser.add_argument('--seed', type=int, help='Random Seed', default=1311)

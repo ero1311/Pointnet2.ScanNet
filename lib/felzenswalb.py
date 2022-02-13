@@ -1,5 +1,6 @@
-from cv2 import norm
-from pc_util import compute_normal
+import sys
+sys.path.append(".")
+from lib.pc_util import compute_normal
 from plyfile import PlyData
 from os.path import join, basename, isfile
 import numpy as np
@@ -59,7 +60,7 @@ class Edge(object):
     def __str__(self):
         return "Node 1: {}, Node 2: {}, Weight Normal: {}".format(self.node1, self.node2, self.w_n)
 
-def read_ply_xyzrgbnormal(filename):
+def read_ply_vertices_edges(filename):
     """ read XYZ RGB normals point cloud from filename PLY file """
     assert(isfile(filename))
     with open(filename, 'rb') as f:
@@ -87,7 +88,7 @@ def read_ply_xyzrgbnormal(filename):
         vertices[:,6:] = nxnynz
     return vertices, list(edges)
 
-def segment_graph(vertices, edges, kthresh=0.01, segMinVerts=20, R=0.5):
+def segment_graph(vertices, edges, kthresh=0.01, segMinVerts=20):
     for edge in edges:
         norm1 = np.linalg.norm(vertices[edge.node1, 6:].reshape(1, 3))
         norm2 = np.linalg.norm(vertices[edge.node2, 6:].reshape(3, 1))
@@ -141,7 +142,7 @@ if __name__ == "__main__":
     parser.add_argument("--seg_min_verts", type=int, default=20)
     parser.add_argument("--output_base", type=str, required=True)
     args = parser.parse_args()
-    vertices, edges = read_ply_xyzrgbnormal(args.scene_path)
+    vertices, edges = read_ply_vertices_edges(args.scene_path)
     seg_idx = segment_graph(vertices, edges, args.k_thresh, args.seg_min_verts)
     out_json = basename(args.scene_path).split('.')[0] + "_" + str(args.k_thresh) + "_" + str(args.seg_min_verts) + '.segs.json'
     out_json = join(args.output_base, out_json)

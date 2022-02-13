@@ -18,11 +18,16 @@ def collect_one_scene_data_label(scene_name, out_filename):
     # Over-segmented segments: maps from segment to vertex/point IDs
     data_folder = os.path.join(CONF.SCANNET_DIR, scene_name)
     mesh_seg_filename = os.path.join(data_folder, '%s_vh_clean_2.0.010000.segs.json'%(scene_name))
+    overseg_filename = os.path.join(CONF.PREP_OVERSEGS, '{}.json'.format(scene_name))
     #print mesh_seg_filename
     with open(mesh_seg_filename) as jsondata:
         d = json.load(jsondata)
         seg = d['segIndices']
         #print len(seg)
+    with open(overseg_filename) as jsondata:
+        d = json.load(jsondata)
+        overseg = np.array(d['segIndices'])
+
     segid_to_pointid = {}
     for i in range(len(seg)):
         if seg[i] not in segid_to_pointid:
@@ -52,6 +57,7 @@ def collect_one_scene_data_label(scene_name, out_filename):
     instance_points_list = []
     instance_labels_list = []
     semantic_labels_list = []
+    overseg_labels_list = []
     for i in range(len(instance_segids)):
         segids = instance_segids[i]
         pointids = []
@@ -63,13 +69,15 @@ def collect_one_scene_data_label(scene_name, out_filename):
         label = RAW2SCANNET[labels[i]]
         label = CLASS_NAMES.index(label)
         semantic_labels_list.append(np.ones((instance_points.shape[0], 1))*label)
-       
+        overseg_labels_list.append(overseg[np.array(pointids)].reshape(-1, 1))
+
     # Refactor data format
     scene_points = np.concatenate(instance_points_list, 0)
     scene_points = scene_points[:,0:9] # XYZ+RGB+NORMAL
     instance_labels = np.concatenate(instance_labels_list, 0) 
     semantic_labels = np.concatenate(semantic_labels_list, 0)
-    data = np.concatenate((scene_points, instance_labels, semantic_labels), 1)
+    overseg_labels = np.concatenate(overseg_labels_list, 0)
+    data = np.concatenate((scene_points, overseg_labels, instance_labels, semantic_labels), 1)
 
     if data.shape[0] > NUM_MAX_PTS:
         choices = np.random.choice(data.shape[0], NUM_MAX_PTS, replace=False)
@@ -79,13 +87,13 @@ def collect_one_scene_data_label(scene_name, out_filename):
     np.save(out_filename, data)
 
 if __name__=='__main__':
-    os.makedirs(CONF.PREP_SCANS, exist_ok=True)
+    os.makedirs(CONF.PREP_SCANS + "_01_100", exist_ok=True)
     
     for i, scene_name in enumerate(CONF.SCENE_NAMES):
         try:
             start = time.time()
             out_filename = scene_name+'.npy' # scene0000_00.npy
-            collect_one_scene_data_label(scene_name, os.path.join(CONF.PREP_SCANS, out_filename))
+            collect_one_scene_data_label(scene_name, os.path.join(CONF.PREP_SCANS + "_01_100", out_filename))
             
             # report
             num_left = len(CONF.SCENE_NAMES) - i - 1
