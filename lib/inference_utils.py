@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import torch
+import torch.nn.functional as F
 from lib.pc_util import point_cloud_label_to_surface_voxel_label_fast
 sys.path.append(".")
 from lib.config import CONF
@@ -24,11 +25,11 @@ def mc_forward(batch_size, model, coords, feats, mc_iters=20):
     assert len(coord_chunk) == len(feat_chunk)
     for coord, feat in zip(coord_chunk, feat_chunk):
         b_size, n_points, _ = coord.shape
-        outputs = torch.cuda.FloatTensor(b_size, n_points, mc_iters)
+        outputs = torch.FloatTensor(b_size, n_points, CONF.NUM_CLASSES, mc_iters)
         with torch.no_grad():
             for i in range(mc_iters):
-                outputs[:, :, i] = model(torch.cat([coord, feat], dim=2)).max(-1)[1]
-        pred.append(outputs.detach().cpu())
+                outputs[:, :, :, i] = F.softmax(model(torch.cat([coord, feat], dim=2)), dim=-1).cpu()
+        pred.append(outputs.mean(dim=-1))
 
     pred = torch.cat(pred, dim=0).unsqueeze(0) # (1, CK, N, C)
 

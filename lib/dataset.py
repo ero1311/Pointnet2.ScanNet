@@ -715,14 +715,13 @@ class ScannetDatasetActiveLearning():
                                 elif self.heuristic == "mc":
                                     preds = mc_forward(1, model, coords, feats, mc_iters)
                                     coords = coords.squeeze(0).view(-1, 3).cpu().numpy()
-                                    preds = preds.view(-1, mc_iters).cpu().numpy()
+                                    preds = preds.view(-1, CONF.NUM_CLASSES).cpu().numpy()
                                     targets = targets.squeeze(0).view(-1).cpu().numpy()
                                     weights = weights.squeeze(0).view(-1).cpu().numpy()
                                     preds = preds[:len(mask[mask==True][mask_start:mask_end])]
                                     scene_entropy = np.zeros(preds.shape[0])
                                     for c in range(CONF.NUM_CLASSES):
-                                        p = np.sum(preds == c, axis=1, dtype=np.float32) / mc_iters
-                                        scene_entropy = scene_entropy - (p * np.log2(p + 1e-12))
+                                        scene_entropy = scene_entropy - (preds[:, c] * np.log2(preds[:, c] + 1e-12))
                                     scores[mask_start:mask_end] = scene_entropy.copy()
                         point_scores[mask] = scores.copy()
                         point_weights[mask] = block_weights.copy()
