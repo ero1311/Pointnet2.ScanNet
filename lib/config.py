@@ -6,6 +6,7 @@ CONF = EasyDict()
 # BASE PATH
 CONF.ROOT = "/home/erik/TUM/Pointnet2.ScanNet" # TODO change this
 CONF.SCANNET_DIR =  "/home/erik/TUM/scannet_root" # TODO change this
+CONF.ANNOT_SERVER_ROOT = "/home/erik/TUM/SegGroup.annotator/annotator"
 
 # Uncomment the followings if you're NOT on slurm
 # CONF.SCANNET_FRAMES_ROOT = os.path.join(CONF.ROOT, "frames_square")
@@ -37,6 +38,9 @@ CONF.SCANNETV2_TEST = os.path.join(CONF.ROOT, "data/scannetv2_100_test.txt")
 CONF.SCANNETV2_LIST = os.path.join(CONF.ROOT, "data/scannetv2_100.txt")
 CONF.SCANNETV2_FILE = os.path.join(CONF.PREP_SCANS, "{}.npy") # scene_id
 CONF.SCANNETV2_LABEL = os.path.join(CONF.SCAN_LABELS, "{}.ply") # scene_id
+
+CONF.ANNOT_SERVER_LABEL = os.path.join(CONF.ANNOT_SERVER_ROOT, "public/data/label/{}.json")
+CONF.ANNOT_SERVER_MODEL_PATH = os.path.join(CONF.ROOT, "annot_server/pointnet_pp_best.pth")
 
 CONF.NYUCLASSES = [
     'floor', 
