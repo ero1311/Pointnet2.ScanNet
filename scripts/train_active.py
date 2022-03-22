@@ -204,7 +204,7 @@ def run_experiments(args):
         missing, unexpected = model.load_state_dict(torch.load(gt_model_path))
         assert len(missing) + len(unexpected) == 0
         model.eval()
-        gt_dataset.choose_new_points(model=model)
+        gt_dataset.choose_new_points(model=model, n_segs=args.number_segs)
         experiment = experiment_prefix + "_gt_" + str(i)
         train(args, gt_dataset, val_dataset, experiment)
         gt_pixel_miou = evaluate_pixel_miou(args, experiment)
@@ -218,13 +218,13 @@ def run_experiments(args):
         missing, unexpected = model.load_state_dict(torch.load(mc_model_path))
         assert len(missing) + len(unexpected) == 0
         model.eval()
-        mc_dataset.choose_new_points(model=model)
+        mc_dataset.choose_new_points(model=model, n_segs=args.number_segs)
         experiment = experiment_prefix + "_mc_" + str(i)
         train(args, mc_dataset, val_dataset, experiment)
         mc_pixel_miou = evaluate_pixel_miou(args, experiment)
 
         #perform random choice
-        random_dataset.choose_new_points()
+        random_dataset.choose_new_points(n_segs=args.number_segs)
         experiment = experiment_prefix + "_rand_" + str(i)
         train(args, random_dataset, val_dataset, experiment)
         random_pixel_miou = evaluate_pixel_miou(args, experiment)
@@ -245,6 +245,7 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', type=str, help='gpu', default='0')
     parser.add_argument('--batch_size', type=int, help='batch size', default=32)
     parser.add_argument('--patience', type=int, help='batch size', default=10)
+    parser.add_argument('--number_segs', type=int, help='batch size', default=1)
     parser.add_argument('--n_active_iters', type=int, help='number of active learning cycles', default=10)
     parser.add_argument('--n_points_train', type=int, help='number of active learning cycles', default=8192)
     parser.add_argument('--seed', type=int, help='Random Seed', default=1311)

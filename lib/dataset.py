@@ -620,7 +620,7 @@ class ScannetDatasetActiveLearning():
             
         print("done!\n")
 
-    def choose_new_points(self, model=None, mc_iters=20):
+    def choose_new_points(self, model=None, mc_iters=20, n_segs=1):
         '''
         Choose new points to be annotated and added to the dataset
 
@@ -655,8 +655,10 @@ class ScannetDatasetActiveLearning():
                 point_set_ini = np.concatenate([point_set_ini, multiview_features], axis=1)
 
             if self.heuristic == 'random':
-                rand_seg_id = np.random.choice(np.unique(scene_data[:, 9]), size=1)
-                current_choice = (self.scene_data[scene_id][:, 9] == rand_seg_id)        
+                rand_seg_id = np.random.choice(np.unique(scene_data[:, 9]), size=n_segs, replace=False)
+                current_choice = np.zeros_like(self.scene_data[scene_id][:, 9], dtype=np.bool)
+                for curr_seg_id in rand_seg_id:
+                    current_choice = np.logical_or(current_choice, (self.scene_data[scene_id][:, 9] == curr_seg_id))     
             else:
                 point_scores = np.zeros(self.scene_data[scene_id].shape[0])
                 point_weights = np.zeros_like(point_scores)
@@ -720,14 +722,15 @@ class ScannetDatasetActiveLearning():
                                     weights = weights.squeeze(0).view(-1).cpu().numpy()
                                     preds = preds[:len(mask[mask==True][mask_start:mask_end])]
                                     scene_entropy = np.zeros(preds.shape[0])
+                                    pred_weights = self.labelweights[preds.argmax(axis=1)]
                                     for c in range(CONF.NUM_CLASSES):
                                         scene_entropy = scene_entropy - (preds[:, c] * np.log2(preds[:, c] + 1e-12))
-                                    scores[mask_start:mask_end] = scene_entropy.copy()
+                                    scores[mask_start:mask_end] = pred_weights * scene_entropy
                         point_scores[mask] = scores.copy()
                         point_weights[mask] = block_weights.copy()
                         point_mask = np.logical_or(point_mask, mask)
                         
-                point_weights *= point_scores
+                point_weights = point_weights * point_scores
                 for i in np.unique(scene_data[:, 9]):
                     mask = (self.scene_data[scene_id][:, 9] == i)
                     if self.heuristic == "mc":
@@ -735,7 +738,9 @@ class ScannetDatasetActiveLearning():
                     elif self.heuristic == "gt":
                         segment_scores.append((float(np.sum(point_weights[mask])), i))
                 segment_scores = sorted(segment_scores, key=lambda x: x[0], reverse=True)
-                current_choice = (self.scene_data[scene_id][:, 9] == segment_scores[0][1])
+                current_choice = np.zeros_like(self.scene_data[scene_id][:, 9], dtype=np.bool)
+                for curr_id in range(min(n_segs, len(segment_scores))):
+                    current_choice = np.logical_or(current_choice, (self.scene_data[scene_id][:, 9] == segment_scores[curr_id][1]))
             self.selected_mask[scene_id] = np.logical_or(self.selected_mask[scene_id], current_choice)          
             self._prepare_weights()
         print("HEURISTIC: ", self.heuristic, "WEIGHTS: ", self.labelweights)
