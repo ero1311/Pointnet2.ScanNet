@@ -40,6 +40,7 @@ CONF.SCANNETV2_FILE = os.path.join(CONF.PREP_SCANS, "{}.npy") # scene_id
 CONF.SCANNETV2_LABEL = os.path.join(CONF.SCAN_LABELS, "{}.ply") # scene_id
 
 CONF.ANNOT_SERVER_LABEL = os.path.join(CONF.ANNOT_SERVER_ROOT, "public/data/label/{}.json")
+CONF.ANNOT_SERVER_PREDS = os.path.join(CONF.ANNOT_SERVER_ROOT, "public/data/preannots/{}.json")
 CONF.ANNOT_SERVER_MODEL_PATH = os.path.join(CONF.ROOT, "annot_server/pointnet_pp_best.pth")
 
 CONF.NYUCLASSES = [

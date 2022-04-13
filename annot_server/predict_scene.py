@@ -24,7 +24,6 @@ def get_scene_labels(file_path, idx_to_label, model, point_classes):
     point_set_ini = np.concatenate([point_set_ini, normal], axis=1)
     npoints = 8192
     point_labels = np.zeros(scene_data.shape[0])
-    print("tpuma")
     for i in range(nsubvolume_x):
         for j in range(nsubvolume_y):
             curmin = coordmin+[i*xlength, j*ylength, 0]
@@ -55,12 +54,17 @@ def get_scene_labels(file_path, idx_to_label, model, point_classes):
                     block_labels[mask_start:mask_end] = preds.copy()
             point_labels[mask] = block_labels.copy()
 
-    pre_annots = {}
-    for seg_id in idx_to_label:
-        class_name = point_classes[int(point_labels[int(seg_id)])]
-        if class_name not in pre_annots:
-            pre_annots[class_name] = []
-        pre_annots[class_name].append(int(seg_id))
+    pre_annots = {
+        "classes": {}
+    }
+
+    for seg_id, seg_points in idx_to_label.items():
+        seg_points = np.array(seg_points, dtype=np.int)
+        seg_cls, seg_cnt = np.unique(point_labels[seg_points], return_counts=True)
+        class_name = point_classes[int(seg_cls[np.argmax(seg_cnt)])]
+        if class_name not in pre_annots["classes"]:
+            pre_annots["classes"][class_name] = []
+        pre_annots["classes"][class_name].append(int(seg_id))
     
     return pre_annots
 
