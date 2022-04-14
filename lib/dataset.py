@@ -35,7 +35,7 @@ class ScannetDataset():
             multiview_database = h5py.File(CONF.MULTIVIEW, "r", libver="latest")
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
-            label = scene_data[:, 10]
+            label = scene_data[:, 11]
 
             # append
             scene_points_list.append(scene_data)
@@ -68,7 +68,7 @@ class ScannetDataset():
         point_set = scene_data[:, :3] # include xyz by default
         rgb = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
         normal = scene_data[:, 6:9]
-        label = scene_data[:, 10].astype(np.int32)
+        label = scene_data[:, 11].astype(np.int32)
         if self.use_multiview:
             feature = scene_data[:, 11:]
             point_set = np.concatenate([point_set, feature], axis=1)
@@ -209,7 +209,7 @@ class ScannetDataset():
         print("generate new chunks for {}...".format(self.phase))
         for scene_id in tqdm(self.scene_list):
             scene = self.scene_data[scene_id]
-            semantic = scene[:, 10].astype(np.int32)
+            semantic = scene[:, 11].astype(np.int32)
             if self.use_multiview:
                 feature = self.multiview_data[scene_id]
 
@@ -273,7 +273,7 @@ class ScannetDatasetWholeScene():
 
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
-            label = scene_data[:, 10].astype(np.int32)
+            label = scene_data[:, 11].astype(np.int32)
             self.scene_points_list.append(scene_data)
             self.semantic_labels_list.append(label)
 
