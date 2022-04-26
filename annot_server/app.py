@@ -144,6 +144,7 @@ def get_preannotations():
         }
     return {
         'data': annots,
+        'preds': annots,
         'message': 'OK',
         'status': 200
     }
@@ -165,9 +166,9 @@ def check_preannots(filename=None):
             if RAW2SCANNET[ann_inst["label"]] not in gts:
                 gts[RAW2SCANNET[ann_inst["label"]]] = []
             gts[RAW2SCANNET[ann_inst["label"]]].extend(ann_inst["segments"])
-        for class_name, seg_ids in preds['classes'].items():
-            if class_name in gts:
-                wrong_segs.extend(list(set(seg_ids).difference(set(gts[class_name]))))
+        for class_name, seg_ids in gts.items():
+            if class_name in preds['classes']:
+                wrong_segs.extend(list(set(seg_ids).difference(set(preds['classes'][class_name]))))
             else:
                 wrong_segs.extend(seg_ids)
     except Exception as e:
