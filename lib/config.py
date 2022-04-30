@@ -24,7 +24,7 @@ CONF.SCANNET_FRAMES = os.path.join(CONF.SCANNET_FRAMES_ROOT, "{}/{}") # scene_id
 CONF.SCENE_NAMES = sorted(os.listdir(CONF.SCANNET_DIR))
 
 CONF.PREP = os.path.join(CONF.ROOT, "preprocessing")
-CONF.PREP_SCANS = os.path.join(CONF.PREP, "scannet_scenes")
+CONF.PREP_SCANS = os.path.join(CONF.PREP, "scannet_scenes_100_tool")
 CONF.SCAN_LABELS = os.path.join(CONF.PREP, "label_point_clouds")
 CONF.OUTPUT_ROOT = os.path.join(CONF.ROOT, "outputs")
 CONF.ENET_WEIGHTS = os.path.join(CONF.ROOT, "data/scannetv2_enet.pth")
