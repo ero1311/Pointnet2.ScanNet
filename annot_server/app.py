@@ -7,6 +7,7 @@ from flask_cors import cross_origin
 import importlib
 import torch
 from predict_scene import get_scene_labels
+import numpy as np
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../'))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../pointnet2/'))
@@ -182,3 +183,38 @@ def check_preannots(filename=None):
             'message': 'OK',
             'status': 200
         }
+
+@app.route('/closestimage', methods=['POST'])
+@cross_origin()
+def get_closest_image():
+    path = ""
+    data = json.loads(request.data)
+    pose_roots = os.path.join(CONF.SCANNET_DIR, data["file_name"], "pose")
+    try:
+        pose_files = os.listdir(pose_roots)
+        poses_npy_dict = {}
+        curr_pose = np.array(data["curr_pose"]).reshape(4, 4)
+        for pose_name in pose_files:
+            with open(os.path.join(pose_roots, pose_name)) as f:
+                pose_data = f.readlines()
+            data_npy = np.array([[float(i) for i in line.strip().split(' ')] for line in pose_data])
+            poses_npy_dict[pose_name] = data_npy
+        min_score = np.inf
+        min_pose = None
+        for key, value in poses_npy_dict.items():
+            norm = np.linalg.norm((curr_pose - value), ord='nuc')
+            if norm < min_score:
+                min_score = norm
+                min_pose = key
+        path = os.path.join(data["file_name"], "color", min_pose.split(".")[0] + ".jpg")
+    except Exception as e:
+        return {
+            'message': 'failed to get the closest image',
+            'data': path,
+            'status': 400
+        }
+    return {
+        'message': 'OK',
+        'data': path,
+        'status': 200
+    }
