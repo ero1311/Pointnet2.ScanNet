@@ -10,7 +10,6 @@ import torch.optim as optim
 import numpy as np
 from torch.utils.data import DataLoader
 from pathlib import Path
-from copy import deepcopy
 from torch.utils.tensorboard import SummaryWriter
 from shutil import copytree
 from scipy.stats import mode
@@ -23,6 +22,7 @@ from lib.config import CONF
 from lib.inference_utils import prep_visualization, filter_points
 from eval import filter_points, eval_wholescene
 from open3d.visualization.tensorboard_plugin import summary
+from copy import deepcopy
 
 
 def get_num_params(model):
@@ -31,8 +31,8 @@ def get_num_params(model):
 
     return num_params
 
-def get_solver(args, dataset, dataloader, stamp, weight):
-    model = get_model(args, stamp)
+def get_solver(args, dataset, dataloader, stamp, weight, prev_stamp):
+    model = get_model(args, stamp, prev_stamp=prev_stamp)
     num_params = get_num_params(model)
     criterion = WeightedCrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
@@ -40,11 +40,13 @@ def get_solver(args, dataset, dataloader, stamp, weight):
 
     return solver, num_params
 
-def get_model(args, stamp, mc_drop=False):
+def get_model(args, stamp, mc_drop=False, prev_stamp=None):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../pointnet2/'))
     Pointnet = importlib.import_module("pointnet2_semseg")
     input_channels = int(args.use_color) * 3 + int(args.use_normal) * 3 + int(args.use_multiview) * 128
     model = Pointnet.get_model(num_classes=CONF.NUM_CLASSES, is_msg=args.use_msg, input_channels=input_channels, use_xyz=not args.no_xyz, bn=not args.no_bn, mc_drop=mc_drop).cuda()
+    if prev_stamp:
+        model.load_state_dict(torch.load(os.path.join(args.output, prev_stamp, "model.pth")))
 
     return model
 
@@ -70,7 +72,7 @@ def save_info(args, root, train_examples, val_examples, num_params):
     with open(os.path.join(root, "info.json"), "w") as f:
         json.dump(info, f, indent=4)
 
-def train(args, train_dataset, val_dataset, stamp):
+def train(args, train_dataset, val_dataset, stamp, prev_stamp=None):
     # init training dataset
     print("preparing data...")
     
@@ -95,7 +97,7 @@ def train(args, train_dataset, val_dataset, stamp):
     #if args.tag: stamp += "_"+args.tag.upper()
     root = os.path.join(args.output, stamp)
     os.makedirs(root, exist_ok=True)
-    solver, num_params = get_solver(args, dataset, dataloader, stamp, weight)
+    solver, num_params = get_solver(args, dataset, dataloader, stamp, weight, prev_stamp)
     
     print("\n[info]")
     print("Train examples: {}".format(train_examples))
@@ -151,7 +153,7 @@ def run_experiments(args):
         max_id = max(experiments, key=lambda x: int(x.name.split("_")[1]))
         experiment_prefix = "experiment_" + str(int(max_id.name.split("_")[1]) + 1)
     experiment = experiment_prefix + "_rand_0"
-    train(args, random_dataset, val_dataset, experiment)
+    train(args, random_dataset, val_dataset, experiment, prev_stamp=False)
     rand_0_pixel_miou = evaluate_pixel_miou(args, experiment)
     copytree(os.path.join(args.output, experiment), os.path.join(args.output, experiment_prefix + "_mc_0"))
     copytree(os.path.join(args.output, experiment), os.path.join(args.output, experiment_prefix + "_gt_0"))
@@ -167,6 +169,8 @@ def run_experiments(args):
         },
         1
     )
+    if not args.complete_retrain:
+        args.epoch = args.retrain_epoch
     for i in range(1, args.n_active_iters):
         #pointcloud visualization
         data = prep_visualization(mc_dataset, gt_dataset, random_dataset)
@@ -206,7 +210,8 @@ def run_experiments(args):
         model.eval()
         gt_dataset.choose_new_points(model=model, n_segs=args.number_segs)
         experiment = experiment_prefix + "_gt_" + str(i)
-        train(args, gt_dataset, val_dataset, experiment)
+        prev_stamp = None if args.complete_retrain else prev_gt_experiment
+        train(args, gt_dataset, val_dataset, experiment, prev_stamp)
         gt_pixel_miou = evaluate_pixel_miou(args, experiment)
 
         #Perform MC active learning
@@ -220,13 +225,16 @@ def run_experiments(args):
         model.eval()
         mc_dataset.choose_new_points(model=model, n_segs=args.number_segs)
         experiment = experiment_prefix + "_mc_" + str(i)
-        train(args, mc_dataset, val_dataset, experiment)
+        prev_stamp = None if args.complete_retrain else prev_mc_experiment
+        train(args, mc_dataset, val_dataset, experiment, prev_stamp)
         mc_pixel_miou = evaluate_pixel_miou(args, experiment)
 
         #perform random choice
+        prev_rand_experiment = experiment_prefix + "_rand_" + str(i - 1)
         random_dataset.choose_new_points(n_segs=args.number_segs)
         experiment = experiment_prefix + "_rand_" + str(i)
-        train(args, random_dataset, val_dataset, experiment)
+        prev_stamp = None if args.complete_retrain else prev_rand_experiment
+        train(args, random_dataset, val_dataset, experiment, prev_stamp)
         random_pixel_miou = evaluate_pixel_miou(args, experiment)
         logger.add_scalars(
             "eval/{}".format("point_miou_active"),
@@ -250,6 +258,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_points_train', type=int, help='number of active learning cycles', default=8192)
     parser.add_argument('--seed', type=int, help='Random Seed', default=1311)
     parser.add_argument('--epoch', type=int, help='number of epochs', default=500)
+    parser.add_argument('--retrain_epoch', type=int, help='number of epochs', default=100)
     parser.add_argument('--verbose', type=int, help='iterations of showing verbose', default=10)
     parser.add_argument('--num_workers', type=int, help='number of workers in dataloader', default=0)
     parser.add_argument('--lr', type=float, help='learning rate', default=1e-3)
@@ -267,6 +276,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_color", action="store_true", help="use color values or not")
     parser.add_argument("--use_normal", action="store_true", help="use normals or not")
     parser.add_argument("--use_multiview", action="store_true", help="use multiview image features or not")
+    parser.add_argument("--complete_retrain", action="store_true", help="reatrain the model from scratch in each AL cycle")
     args = parser.parse_args()
 
     # setting
