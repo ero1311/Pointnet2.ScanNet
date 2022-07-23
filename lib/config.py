@@ -4,8 +4,8 @@ from easydict import EasyDict
 CONF = EasyDict()
 
 # BASE PATH
-CONF.ROOT = "/home/erik/TUM/Pointnet2.ScanNet" # TODO change this
-CONF.SCANNET_DIR =  "/home/erik/TUM/scannet_root" # TODO change this
+CONF.ROOT = "/home/erik/workspace/Pointnet2.ScanNet" # TODO change this
+CONF.SCANNET_DIR =  "/home/erik/workspace/scannet_root" # TODO change this
 
 # Uncomment the followings if you're NOT on slurm
 # CONF.SCANNET_FRAMES_ROOT = os.path.join(CONF.ROOT, "frames_square")

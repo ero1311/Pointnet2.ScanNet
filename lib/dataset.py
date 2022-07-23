@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 sample_utils = importlib.import_module("pointnet2_utils")
 
 class ScannetDataset():
-    def __init__(self, phase, scene_list, num_classes=21, npoints=8192, is_weighting=True, use_multiview=False, use_color=False, use_normal=False):
+    def __init__(self, phase, scene_list, num_classes=21, npoints=2048, is_weighting=True, use_multiview=False, use_color=False, use_normal=False):
         self.phase = phase
         assert phase in ["train", "val", "test"]
         self.scene_list = scene_list
@@ -77,23 +77,25 @@ class ScannetDataset():
         scene_id = self.scene_list[index]
         scene_data = self.chunk_data[scene_id]
         # unpack
-        point_set = scene_data[:, :3] # include xyz by default
+        xyz = scene_data[:, :3] # include xyz by default
         rgb = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
-        normal = scene_data[:, 6:9]
+        xyz_min = np.amin(xyz, axis=0)
+        xyz -= xyz_min
         label = scene_data[:, 11].astype(np.int32)
-        if self.use_multiview:
-            feature = scene_data[:, 11:]
-            point_set = np.concatenate([point_set, feature], axis=1)
         
-        if self.use_color:
-            point_set = np.concatenate([point_set, rgb], axis=1)
-
-        if self.use_normal:
-            point_set = np.concatenate([point_set, normal], axis=1)
-
         if self.phase == "train":
             point_set = self._augment(point_set)
         
+        xyz_min = np.amin(xyz, axis=0)
+        XYZ = xyz - xyz_min
+        xyz_max = np.amax(XYZ, axis=0)
+        XYZ = XYZ/xyz_max
+        # prepare mask
+        ptcloud = []
+        ptcloud.append(xyz)
+        ptcloud.append(rgb)
+        ptcloud.append(XYZ)
+        point_set = np.concatenate(ptcloud, axis=1)
         # prepare mask
         curmin = np.min(point_set, axis=0)[:3]
         curmax = np.max(point_set, axis=0)[:3]
@@ -266,7 +268,7 @@ class ScannetDataset():
         print("done!\n")
 
 class ScannetDatasetWholeScene():
-    def __init__(self, scene_list, npoints=8192, is_weighting=True, use_color=False, use_normal=False, use_multiview=False):
+    def __init__(self, scene_list, npoints=2048, is_weighting=True, use_color=False, use_normal=False, use_multiview=False):
         self.scene_list = scene_list
         self.npoints = npoints
         self.is_weighting = is_weighting
@@ -317,13 +319,6 @@ class ScannetDatasetWholeScene():
         if self.use_color:
             point_set_ini = np.concatenate([point_set_ini, color], axis=1)
 
-        if self.use_normal:
-            point_set_ini = np.concatenate([point_set_ini, normal], axis=1)
-
-        if self.use_multiview:
-            multiview_features = self.multiview_data[index]
-            point_set_ini = np.concatenate([point_set_ini, multiview_features], axis=1)
-
         semantic_seg_ini = self.semantic_labels_list[index].astype(np.int32)
         coordmax = point_set_ini[:, :3].max(axis=0)
         coordmin = point_set_ini[:, :3].min(axis=0)
@@ -358,7 +353,21 @@ class ScannetDatasetWholeScene():
                     semantic_seg = cur_semantic_segs[k] # N
                     # if sum(mask)/float(len(mask))<0.01:
                     #     continue
+                    xyz = point_set[:, :3] # include xyz by default
+                    rgb = point_set[:, 3:6]
+                    xyz_min = np.amin(xyz, axis=0)
+                    xyz -= xyz_min
 
+                    xyz_min = np.amin(xyz, axis=0)
+                    XYZ = xyz - xyz_min
+                    xyz_max = np.amax(XYZ, axis=0)
+                    XYZ = XYZ/xyz_max
+                    # prepare mask
+                    ptcloud = []
+                    ptcloud.append(xyz)
+                    ptcloud.append(rgb)
+                    ptcloud.append(XYZ)
+                    point_set = np.concatenate(ptcloud, axis=1)
                     sample_weight = self.labelweights[semantic_seg]
                     point_sets.append(np.expand_dims(point_set,0)) # 1xNx3
                     semantic_segs.append(np.expand_dims(semantic_seg,0)) # 1xN
@@ -434,33 +443,35 @@ class ScannetDatasetActiveLearning():
         scene_id = self.scene_list[index]
         scene_data = self.chunk_data[scene_id]
         # unpack
-        point_set = scene_data[:, :3] # include xyz by default
+        xyz = scene_data[:, :3] # include xyz by default
         rgb = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
-        normal = scene_data[:, 6:9]
+        xyz_min = np.amin(xyz, axis=0)
+        xyz -= xyz_min
         label = scene_data[:, 11].astype(np.int32)
-        if self.use_multiview:
-            feature = scene_data[:, 12:]
-            point_set = np.concatenate([point_set, feature], axis=1)
-        
-        if self.use_color:
-            point_set = np.concatenate([point_set, rgb], axis=1)
-
-        if self.use_normal:
-            point_set = np.concatenate([point_set, normal], axis=1)
 
         if self.phase == "train":
-            point_set = self._augment(point_set)
-        
+            xyz = self._augment(xyz)
+
+        xyz_min = np.amin(xyz, axis=0)
+        XYZ = xyz - xyz_min
+        xyz_max = np.amax(XYZ, axis=0)
+        XYZ = XYZ/xyz_max
         # prepare mask
-        curmin = np.min(point_set, axis=0)[:3]
-        curmax = np.max(point_set, axis=0)[:3]
-        mask = np.sum((point_set[:, :3] >= (curmin - 0.01)) * (point_set[:, :3] <= (curmax + 0.01)), axis=1) == 3
+        ptcloud = []
+        ptcloud.append(xyz)
+        ptcloud.append(rgb)
+        ptcloud.append(XYZ)
+        ptcloud = np.concatenate(ptcloud, axis=1)
+
+        curmin = np.min(ptcloud, axis=0)[:3]
+        curmax = np.max(ptcloud, axis=0)[:3]
+        mask = np.sum((ptcloud[:, :3] >= (curmin - 0.01)) * (ptcloud[:, :3] <= (curmax + 0.01)), axis=1) == 3
         sample_weight = self.labelweights[label]
         sample_weight *= mask
 
         fetch_time = time.time() - start
 
-        return point_set, label, sample_weight, fetch_time
+        return ptcloud, label, sample_weight, fetch_time
 
     def __len__(self):
         return len(self.scene_list)
@@ -642,17 +653,9 @@ class ScannetDatasetActiveLearning():
 
             point_set_ini = self.scene_data[scene_id][:, :3]
             color = self.scene_data[scene_id][:, 3:6] / 255.
-            normal = self.scene_data[scene_id][:, 6:9]
 
             if self.use_color:
                 point_set_ini = np.concatenate([point_set_ini, color], axis=1)
-
-            if self.use_normal:
-                point_set_ini = np.concatenate([point_set_ini, normal], axis=1)
-
-            if self.use_multiview:
-                multiview_features = self.multiview_data[scene_id]
-                point_set_ini = np.concatenate([point_set_ini, multiview_features], axis=1)
 
             if self.heuristic == 'random':
                 rand_seg_id = np.random.choice(np.unique(scene_data[:, 9]), size=n_segs, replace=False)
@@ -664,7 +667,7 @@ class ScannetDatasetActiveLearning():
                 point_weights = np.zeros_like(point_scores)
                 point_mask = np.zeros_like(self.selected_mask[scene_id], dtype=np.bool)
                 segment_scores = []
-                npoints = 8192
+                npoints = 2048
 
                 for i in range(nsubvolume_x):
                     for j in range(nsubvolume_y):
@@ -691,6 +694,20 @@ class ScannetDatasetActiveLearning():
                             mask_start, mask_end = k * npoints, (k + 1) * npoints
                             semantic_seg = cur_semantic_segs[k] # N
                             sample_weight = self.labelweights[semantic_seg]
+                            xyz = point_set[:, :3] # include xyz by default
+                            rgb = point_set[:, 3:6] # normalize the rgb values to [0, 1]
+                            xyz_min = np.amin(xyz, axis=0)
+                            xyz -= xyz_min
+                            xyz_min = np.amin(xyz, axis=0)
+                            XYZ = xyz - xyz_min
+                            xyz_max = np.amax(XYZ, axis=0)
+                            XYZ = XYZ/xyz_max
+                            # prepare mask
+                            ptcloud = []
+                            ptcloud.append(xyz)
+                            ptcloud.append(rgb)
+                            ptcloud.append(XYZ)
+                            point_set = np.concatenate(ptcloud, axis=1)
                             with torch.no_grad():
                                 point_set = np.expand_dims(point_set, 0) # 1xNx3
                                 semantic_seg = np.expand_dims(semantic_seg, 0) # 1x1xN

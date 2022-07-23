@@ -3,16 +3,15 @@ import sys
 import json
 import argparse
 import importlib
-from numpy.core.fromnumeric import nonzero
 import torch
-from torch.functional import norm
+
 import torch.optim as optim
 import numpy as np
 from torch.utils.data import DataLoader
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 from shutil import copytree
-from scipy.stats import mode
+
 
 sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
 from lib.solver import Solver
@@ -21,8 +20,6 @@ from lib.loss import WeightedCrossEntropyLoss
 from lib.config import CONF
 from lib.inference_utils import prep_visualization, filter_points
 from eval import filter_points, eval_wholescene
-from open3d.visualization.tensorboard_plugin import summary
-from copy import deepcopy
 
 
 def get_num_params(model):
@@ -42,9 +39,8 @@ def get_solver(args, dataset, dataloader, stamp, weight, prev_stamp):
 
 def get_model(args, stamp, mc_drop=False, prev_stamp=None):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../pointnet2/'))
-    Pointnet = importlib.import_module("pointnet2_semseg")
-    input_channels = int(args.use_color) * 3 + int(args.use_normal) * 3 + int(args.use_multiview) * 128
-    model = Pointnet.get_model(num_classes=CONF.NUM_CLASSES, is_msg=args.use_msg, input_channels=input_channels, use_xyz=not args.no_xyz, bn=not args.no_bn, mc_drop=mc_drop).cuda()
+    DGCNN = importlib.import_module("dgcnn")
+    model = DGCNN.DGCNNSeg([[64,64], [64, 64], [64, 64]], [512, 256], 9, 20, CONF.NUM_CLASSES, mc_drop=mc_drop).cuda()
     if prev_stamp:
         model.load_state_dict(torch.load(os.path.join(args.output, prev_stamp, "model.pth")))
 
@@ -105,6 +101,8 @@ def train(args, train_dataset, val_dataset, stamp, prev_stamp=None):
     print("Start training...\n")
     save_info(args, root, train_examples, val_examples, num_params)
     solver(args.epoch, args.verbose)
+    del solver
+    torch.cuda.empty_cache()
 
 def evaluate_pixel_miou(args, stamp):
     # prepare data
@@ -117,18 +115,18 @@ def evaluate_pixel_miou(args, stamp):
     print("loading model...")
     model_path = "model.pth" if args.use_best else "model_last.pth"
     model_path = os.path.join(args.output, stamp, model_path)
-    Pointnet = importlib.import_module("pointnet2_semseg")
-    input_channels = int(args.use_color) * 3 + int(args.use_normal) * 3 + int(args.use_multiview) * 128
-    model = Pointnet.get_model(num_classes=CONF.NUM_CLASSES, is_msg=args.use_msg, input_channels=input_channels, use_xyz=not args.no_xyz, bn=not args.no_bn).cuda()
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
+    DGCNN = importlib.import_module("dgcnn")
+    with torch.no_grad():
+        model = DGCNN.DGCNNSeg([[64,64], [64, 64], [64, 64]], [512, 256], 9, 20, CONF.NUM_CLASSES, mc_drop=False).cuda()
+        model.load_state_dict(torch.load(model_path))
+        model.eval()
 
-    # eval
-    print("evaluating...")
-    _, _, _, _, _, pointmiou_per_class_array, _, masks = eval_wholescene(args, model, dataloader)
-    
-    avg_pointmiou_per_class = np.sum(pointmiou_per_class_array * masks, axis=0)/np.sum(masks, axis=0)
-    avg_pointmiou = np.mean(avg_pointmiou_per_class)
+        # eval
+        print("evaluating...")
+        _, _, _, _, _, pointmiou_per_class_array, _, masks = eval_wholescene(args, model, dataloader)
+        
+        avg_pointmiou_per_class = np.sum(pointmiou_per_class_array * masks, axis=0)/np.sum(masks, axis=0)
+        avg_pointmiou = np.mean(avg_pointmiou_per_class)
 
     return avg_pointmiou
 
@@ -154,6 +152,7 @@ def run_experiments(args):
         experiment_prefix = "experiment_" + str(int(max_id.name.split("_")[1]) + 1)
     experiment = experiment_prefix + "_rand_0"
     train(args, random_dataset, val_dataset, experiment, prev_stamp=False)
+    torch.cuda.empty_cache()
     rand_0_pixel_miou = evaluate_pixel_miou(args, experiment)
     copytree(os.path.join(args.output, experiment), os.path.join(args.output, experiment_prefix + "_mc_0"))
     copytree(os.path.join(args.output, experiment), os.path.join(args.output, experiment_prefix + "_gt_0"))
@@ -173,7 +172,6 @@ def run_experiments(args):
         args.epoch = args.retrain_epoch
     for i in range(1, args.n_active_iters):
         #pointcloud visualization
-        data = prep_visualization(mc_dataset, gt_dataset, random_dataset)
         for scene_id in random_dataset.scene_list:
             mc_scene_data = mc_dataset.scene_data[scene_id][mc_dataset.selected_mask[scene_id]]
             gt_scene_data = gt_dataset.scene_data[scene_id][gt_dataset.selected_mask[scene_id]]
@@ -184,20 +182,6 @@ def run_experiments(args):
             print("GT: ", gt_scene_data.shape, gt_filtered.shape)
             print("MC: ", mc_scene_data.shape, mc_filtered.shape)
             print("RANDOM: ", random_scene_data.shape, random_filtered.shape)
-            
-        for scene_id, (vertex, colors, normals) in data.items():
-            vertex = torch.as_tensor(vertex, dtype=torch.float)#.unsqueeze(0)
-            colors = torch.as_tensor(colors, dtype=torch.uint8)#.unsqueeze(0)
-            normals = torch.as_tensor(normals, dtype=torch.float)#.unsqueeze(0) 
-            logger.add_3d(
-                "{}/{}".format(experiment_prefix, scene_id),
-                {
-                    "vertex_positions": vertex,
-                    "vertex_colors": colors,
-                    "vertex_normals": normals
-                },
-                i
-            )
 
         #Perform gt active learning
         prev_gt_experiment = experiment_prefix + "_gt_" + str(i - 1)
