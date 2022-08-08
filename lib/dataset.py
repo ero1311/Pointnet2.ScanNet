@@ -39,24 +39,10 @@ class ScannetDataset():
         self._prepare_weights()
 
     def _prepare_weights(self):
-        self.scene_data = {}
-        self.multiview_data = {}
-        scene_points_list = []
         semantic_labels_list = []
-        if self.use_multiview:
-            multiview_database = h5py.File(CONF.MULTIVIEW, "r", libver="latest")
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
-            label = scene_data[:, 11]
-
-            # append
-            scene_points_list.append(scene_data)
-            semantic_labels_list.append(label)
-            self.scene_data[scene_id] = scene_data
-
-            if self.use_multiview:
-                feature = multiview_database.get(scene_id)[()]
-                self.multiview_data[scene_id] = feature
+            semantic_labels_list.append(scene_data[:, 11])
 
         if self.is_weighting:
             labelweights = np.zeros(self.num_classes)
@@ -75,7 +61,7 @@ class ScannetDataset():
 
         # load chunks
         scene_id = self.scene_list[index]
-        scene_data = self.chunk_data[scene_id]
+        scene_data = self.generate_chunk(scene_id)
         # unpack
         xyz = scene_data[:, :3] # include xyz by default
         rgb = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
@@ -215,58 +201,45 @@ class ScannetDataset():
 
         return point_set
 
-    def generate_chunks(self):
+    def generate_chunk(self, scene_id):
         """
             note: must be called before training
         """
 
-        print("generate new chunks for {}...".format(self.phase))
-        for scene_id in tqdm(self.scene_list):
-            scene = self.scene_data[scene_id]
-            semantic = scene[:, 11].astype(np.int32)
-            if self.use_multiview:
-                feature = self.multiview_data[scene_id]
+        scene = np.load(CONF.SCANNETV2_FILE.format(scene_id))
+        semantic = scene[:, 11].astype(np.int32)
 
-            coordmax = np.max(scene, axis=0)[:3]
-            coordmin = np.min(scene, axis=0)[:3]
+        coordmax = np.max(scene, axis=0)[:3]
+        coordmin = np.min(scene, axis=0)[:3]
+        
+        for _ in range(5):
+            curcenter = scene[np.random.choice(len(semantic), 1)[0],:3]
+            curmin = curcenter-[0.75,0.75,1.5]
+            curmax = curcenter+[0.75,0.75,1.5]
+            curmin[2] = coordmin[2]
+            curmax[2] = coordmax[2]
+            curchoice = np.sum((scene[:, :3]>=(curmin-0.2))*(scene[:, :3]<=(curmax+0.2)),axis=1)==3
+            cur_point_set = scene[curchoice]
+            cur_semantic_seg = semantic[curchoice]
+
+            if len(cur_semantic_seg)==0:
+                continue
+
+            mask = np.sum((cur_point_set[:, :3]>=(curmin-0.01))*(cur_point_set[:, :3]<=(curmax+0.01)),axis=1)==3
+            vidx = np.ceil((cur_point_set[mask,:3]-curmin)/(curmax-curmin)*[31.0,31.0,62.0])
+            vidx = np.unique(vidx[:,0]*31.0*62.0+vidx[:,1]*62.0+vidx[:,2])
+            isvalid = np.sum(cur_semantic_seg>0)/len(cur_semantic_seg)>=0.7 and len(vidx)/31.0/31.0/62.0>=0.02
+
+            if isvalid:
+                break
+        
+        # store chunk
+        chunk = cur_point_set
+
+        choices = np.random.choice(chunk.shape[0], self.npoints, replace=True)
+        chunk = chunk[choices]
+        return chunk
             
-            for _ in range(5):
-                curcenter = scene[np.random.choice(len(semantic), 1)[0],:3]
-                curmin = curcenter-[0.75,0.75,1.5]
-                curmax = curcenter+[0.75,0.75,1.5]
-                curmin[2] = coordmin[2]
-                curmax[2] = coordmax[2]
-                curchoice = np.sum((scene[:, :3]>=(curmin-0.2))*(scene[:, :3]<=(curmax+0.2)),axis=1)==3
-                cur_point_set = scene[curchoice]
-                cur_semantic_seg = semantic[curchoice]
-                if self.use_multiview:
-                    cur_feature = feature[curchoice]
-
-                if len(cur_semantic_seg)==0:
-                    continue
-
-                mask = np.sum((cur_point_set[:, :3]>=(curmin-0.01))*(cur_point_set[:, :3]<=(curmax+0.01)),axis=1)==3
-                vidx = np.ceil((cur_point_set[mask,:3]-curmin)/(curmax-curmin)*[31.0,31.0,62.0])
-                vidx = np.unique(vidx[:,0]*31.0*62.0+vidx[:,1]*62.0+vidx[:,2])
-                isvalid = np.sum(cur_semantic_seg>0)/len(cur_semantic_seg)>=0.7 and len(vidx)/31.0/31.0/62.0>=0.02
-
-                if isvalid:
-                    break
-            
-            # store chunk
-            if self.use_multiview:
-                chunk = np.concatenate([cur_point_set, cur_feature], axis=1)
-            else:
-                chunk = cur_point_set
-
-            choices = np.random.choice(chunk.shape[0], self.npoints, replace=True)
-            chunk = chunk[choices]
-            self.chunk_data[scene_id] = chunk
-            #self.chunk_data[scene_id] = np.load('/home/erik/TUM/Pointnet2.ScanNet/fix_inp.npy')
-            #np.save('/home/erik/TUM/Pointnet2.ScanNet/fix_inp', chunk)
-            
-        print("done!\n")
-
 class ScannetDatasetWholeScene():
     def __init__(self, scene_list, npoints=2048, is_weighting=True, use_color=False, use_normal=False, use_multiview=False):
         self.scene_list = scene_list
@@ -281,19 +254,10 @@ class ScannetDatasetWholeScene():
     def _load_scene_file(self):
         self.scene_points_list = []
         self.semantic_labels_list = []
-        if self.use_multiview:
-            multiview_database = h5py.File(CONF.MULTIVIEW, "r", libver="latest")
-            self.multiview_data = []
 
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
-            label = scene_data[:, 11].astype(np.int32)
-            self.scene_points_list.append(scene_data)
-            self.semantic_labels_list.append(label)
-
-            if self.use_multiview:
-                feature = multiview_database.get(scene_id)[()]
-                self.multiview_data.append(feature)
+            self.semantic_labels_list.append(scene_data[:, 11].astype(np.int32))
 
         if self.is_weighting:
             labelweights = np.zeros(CONF.NUM_CLASSES)
@@ -309,12 +273,12 @@ class ScannetDatasetWholeScene():
     @background()
     def __getitem__(self, index):
         start = time.time()
-        scene_data = self.scene_points_list[index]
+        scene_id = self.scene_list[index]
+        scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
 
         # unpack
         point_set_ini = scene_data[:, :3] # include xyz by default
         color = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
-        normal = scene_data[:, 6:9]
 
         if self.use_color:
             point_set_ini = np.concatenate([point_set_ini, color], axis=1)
@@ -382,7 +346,7 @@ class ScannetDatasetWholeScene():
         return point_sets, semantic_segs, sample_weights, fetch_time
 
     def __len__(self):
-        return len(self.scene_points_list)
+        return len(self.scene_list)
 
 class ScannetDatasetActiveLearning():
     def __init__(self, phase, scene_list, num_classes=21, npoints=8192, is_weighting=True, use_multiview=False, use_color=False, use_normal=False, heuristic="random"):
@@ -402,16 +366,11 @@ class ScannetDatasetActiveLearning():
         self._prepare_weights()
 
     def _init_data(self):
-        self.scene_data = {}
         self.selected_mask = {}
-        self.multiview_data = {}
-        if self.use_multiview:
-            multiview_database = h5py.File(CONF.MULTIVIEW, "r", libver="latest")
         for scene_id in tqdm(self.scene_list):
             scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
             selected_segment = np.random.choice(np.unique(scene_data[:, 9]), size=1)
             curchoice = (scene_data[:, 9] == selected_segment)
-            self.scene_data[scene_id] = scene_data
             self.selected_mask[scene_id] = curchoice.copy()
 
     def _prepare_weights(self):
@@ -419,7 +378,8 @@ class ScannetDatasetActiveLearning():
             labelweights = np.zeros(self.num_classes)
             semantic_labels_list = []
             for scene_id in self.scene_list:
-                semantic_labels_list.append(self.scene_data[scene_id][self.selected_mask[scene_id]][:, 11])
+                scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
+                semantic_labels_list.append(scene_data[self.selected_mask[scene_id]][:, 11])
             for seg in semantic_labels_list:
                 tmp,_ = np.histogram(seg,range(self.num_classes + 1))
                 labelweights += tmp
@@ -441,7 +401,7 @@ class ScannetDatasetActiveLearning():
 
         # load chunks
         scene_id = self.scene_list[index]
-        scene_data = self.chunk_data[scene_id]
+        scene_data = self.generate_chunk(scene_id)
         # unpack
         xyz = scene_data[:, :3] # include xyz by default
         rgb = scene_data[:, 3:6] / 255. # normalize the rgb values to [0, 1]
@@ -581,55 +541,45 @@ class ScannetDatasetActiveLearning():
 
         return point_set
 
-    def generate_chunks(self):
+    def generate_chunk(self, scene_id):
         """
             note: must be called before training
         """
 
-        print("generate new chunks for {}...".format(self.phase))
-        for scene_id in tqdm(self.scene_list):
-            scene = self.scene_data[scene_id][self.selected_mask[scene_id]]
-            semantic = scene[:, 11].astype(np.int32)
+        scene = np.load(CONF.SCANNETV2_FILE.format(scene_id))[self.selected_mask[scene_id]]
+        semantic = scene[:, 11].astype(np.int32)
+
+        coordmax = np.max(scene, axis=0)[:3]
+        coordmin = np.min(scene, axis=0)[:3]
+        num_points_selected = 0
+        curcenter = scene[np.random.choice(len(semantic), 1)[0],:3]
+        while True:
+            curmin = curcenter-[0.75,0.75,1.5]
+            curmax = curcenter+[0.75,0.75,1.5]
+            curmin[2] = coordmin[2]
+            curmax[2] = coordmax[2]
+            curchoice = np.sum((scene[:, :3]>=(curmin-0.2))*(scene[:, :3]<=(curmax+0.2)),axis=1)==3
+            cur_point_set = scene[curchoice]
+            cur_semantic_seg = semantic[curchoice]
             if self.use_multiview:
-                feature = self.multiview_data[scene_id]
+                cur_feature = feature[curchoice]
 
-            coordmax = np.max(scene, axis=0)[:3]
-            coordmin = np.min(scene, axis=0)[:3]
-            num_points_selected = 0
-            curcenter = scene[np.random.choice(len(semantic), 1)[0],:3]
-            while True:
-                curmin = curcenter-[0.75,0.75,1.5]
-                curmax = curcenter+[0.75,0.75,1.5]
-                curmin[2] = coordmin[2]
-                curmax[2] = coordmax[2]
-                curchoice = np.sum((scene[:, :3]>=(curmin-0.2))*(scene[:, :3]<=(curmax+0.2)),axis=1)==3
-                cur_point_set = scene[curchoice]
-                cur_semantic_seg = semantic[curchoice]
-                if self.use_multiview:
-                    cur_feature = feature[curchoice]
-
-                if len(cur_semantic_seg)==0:
-                    continue
-                
-                if curchoice.sum() > num_points_selected:
-                    curcenter = cur_point_set[:, :3].mean(axis=0)
-                    num_points_selected = curchoice.sum()
-                else:
-                    break
-                
-
+            if len(cur_semantic_seg)==0:
+                continue
             
-            # store chunk
-            if self.use_multiview:
-                chunk = np.concatenate([cur_point_set, cur_feature], axis=1)
+            if curchoice.sum() > num_points_selected:
+                curcenter = cur_point_set[:, :3].mean(axis=0)
+                num_points_selected = curchoice.sum()
             else:
-                chunk = cur_point_set
+                break
+        
+        # store chunk
+        chunk = cur_point_set
 
-            choices = np.random.choice(chunk.shape[0], self.npoints, replace=True)
-            chunk = chunk[choices]
-            self.chunk_data[scene_id] = chunk.copy()
-            
-        print("done!\n")
+        choices = np.random.choice(chunk.shape[0], self.npoints, replace=True)
+        chunk = chunk[choices]
+        return chunk
+
 
     def choose_new_points(self, model=None, mc_iters=20, n_segs=1):
         '''
@@ -644,26 +594,28 @@ class ScannetDatasetActiveLearning():
         xlength = 1.5
         ylength = 1.5
         for scene_id in tqdm(self.scene_list):
-            scene_data = self.scene_data[scene_id]
-            scene_data = scene_data[np.logical_not(self.selected_mask[scene_id])]
-            coordmax = scene_data[:, :3].max(axis=0)
-            coordmin = scene_data[:, :3].min(axis=0)
+            scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
+            scene = scene_data[np.logical_not(self.selected_mask[scene_id])]
+            if scene.shape[0] == 0:
+                continue
+            coordmax = scene[:, :3].max(axis=0)
+            coordmin = scene[:, :3].min(axis=0)
             nsubvolume_x = np.ceil((coordmax[0]-coordmin[0])/xlength).astype(np.int32)
             nsubvolume_y = np.ceil((coordmax[1]-coordmin[1])/ylength).astype(np.int32)
 
-            point_set_ini = self.scene_data[scene_id][:, :3]
-            color = self.scene_data[scene_id][:, 3:6] / 255.
+            point_set_ini = scene_data[:, :3]
+            color = scene_data[:, 3:6] / 255.
 
             if self.use_color:
                 point_set_ini = np.concatenate([point_set_ini, color], axis=1)
 
             if self.heuristic == 'random':
-                rand_seg_id = np.random.choice(np.unique(scene_data[:, 9]), size=n_segs, replace=False)
-                current_choice = np.zeros_like(self.scene_data[scene_id][:, 9], dtype=np.bool)
+                rand_seg_id = np.random.choice(np.unique(scene[:, 9]), size=n_segs, replace=False)
+                current_choice = np.zeros_like(scene_data[:, 9], dtype=np.bool)
                 for curr_seg_id in rand_seg_id:
-                    current_choice = np.logical_or(current_choice, (self.scene_data[scene_id][:, 9] == curr_seg_id))     
+                    current_choice = np.logical_or(current_choice, (scene_data[:, 9] == curr_seg_id))     
             else:
-                point_scores = np.zeros(self.scene_data[scene_id].shape[0])
+                point_scores = np.zeros(scene_data.shape[0])
                 point_weights = np.zeros_like(point_scores)
                 point_mask = np.zeros_like(self.selected_mask[scene_id], dtype=np.bool)
                 segment_scores = []
@@ -676,7 +628,7 @@ class ScannetDatasetActiveLearning():
                         mask = np.sum((point_set_ini[:, :3]>=(curmin-0.01))*(point_set_ini[:, :3]<=(curmax+0.01)), axis=1)==3
                         mask = np.logical_and(mask, np.logical_not(point_mask))
                         cur_point_set = point_set_ini[mask,:]
-                        cur_semantic_seg = self.scene_data[scene_id][mask, 11].astype(np.int32)
+                        cur_semantic_seg = scene_data[mask, 11].astype(np.int32)
                         scores = np.zeros(cur_semantic_seg.shape)
                         block_weights = np.zeros(cur_semantic_seg.shape)
                         block_mask = mask.copy()
@@ -748,16 +700,16 @@ class ScannetDatasetActiveLearning():
                         point_mask = np.logical_or(point_mask, mask)
                         
                 point_weights = point_weights * point_scores
-                for i in np.unique(scene_data[:, 9]):
-                    mask = (self.scene_data[scene_id][:, 9] == i)
+                for i in np.unique(scene[:, 9]):
+                    mask = (scene_data[:, 9] == i)
                     if self.heuristic == "mc":
                         segment_scores.append((float(np.sum(point_scores[mask])), i))
                     elif self.heuristic == "gt":
                         segment_scores.append((float(np.sum(point_weights[mask])), i))
                 segment_scores = sorted(segment_scores, key=lambda x: x[0], reverse=True)
-                current_choice = np.zeros_like(self.scene_data[scene_id][:, 9], dtype=np.bool)
+                current_choice = np.zeros_like(scene_data[:, 9], dtype=np.bool)
                 for curr_id in range(min(n_segs, len(segment_scores))):
-                    current_choice = np.logical_or(current_choice, (self.scene_data[scene_id][:, 9] == segment_scores[curr_id][1]))
+                    current_choice = np.logical_or(current_choice, (scene_data[:, 9] == segment_scores[curr_id][1]))
             self.selected_mask[scene_id] = np.logical_or(self.selected_mask[scene_id], current_choice)          
             self._prepare_weights()
         print("HEURISTIC: ", self.heuristic, "WEIGHTS: ", self.labelweights)

@@ -114,10 +114,6 @@ class Solver():
         for epoch_id in range(epoch):
             print("epoch {} starting...".format(epoch_id + 1))
             
-            # generate new chunks
-            self.dataset["train"].generate_chunks()
-            self.dataset["val"].generate_chunks()
-            
             # train
             self._set_phase("train")
             self._train(self.dataloader["train"], epoch_id)

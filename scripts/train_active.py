@@ -173,9 +173,10 @@ def run_experiments(args):
     for i in range(1, args.n_active_iters):
         #pointcloud visualization
         for scene_id in random_dataset.scene_list:
-            mc_scene_data = mc_dataset.scene_data[scene_id][mc_dataset.selected_mask[scene_id]]
-            gt_scene_data = gt_dataset.scene_data[scene_id][gt_dataset.selected_mask[scene_id]]
-            random_scene_data = random_dataset.scene_data[scene_id][random_dataset.selected_mask[scene_id]]
+            scene_data = np.load(CONF.SCANNETV2_FILE.format(scene_id))
+            mc_scene_data = scene_data[mc_dataset.selected_mask[scene_id]]
+            gt_scene_data = scene_data[gt_dataset.selected_mask[scene_id]]
+            random_scene_data = scene_data[random_dataset.selected_mask[scene_id]]
             mc_filtered, _, _, _ = filter_points(mc_scene_data, mc_scene_data, mc_scene_data, mc_scene_data)
             random_filtered, _, _, _ = filter_points(random_scene_data, random_scene_data, random_scene_data, random_scene_data)
             gt_filtered, _, _, _ = filter_points(gt_scene_data, gt_scene_data, gt_scene_data, gt_scene_data)
