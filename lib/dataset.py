@@ -610,8 +610,11 @@ class ScannetDatasetActiveLearning():
                 point_set_ini = np.concatenate([point_set_ini, color], axis=1)
 
             if self.heuristic == 'random':
-                rand_seg_id = np.random.choice(np.unique(scene[:, 9]), size=n_segs, replace=False)
                 current_choice = np.zeros_like(scene_data[:, 9], dtype=np.bool)
+                if len(np.unique(scene[:, 9])) < n_segs:
+                    rand_seg_id = np.unique(scene[:, 9])
+                else:
+                    rand_seg_id = np.random.choice(np.unique(scene[:, 9]), size=n_segs, replace=False)
                 for curr_seg_id in rand_seg_id:
                     current_choice = np.logical_or(current_choice, (scene_data[:, 9] == curr_seg_id))     
             else:
