@@ -75,7 +75,7 @@ class ScannetDataset():
         xyz_min = np.amin(xyz, axis=0)
         XYZ = xyz - xyz_min
         xyz_max = np.amax(XYZ, axis=0)
-        XYZ = XYZ/xyz_max
+        XYZ = XYZ/(xyz_max + 1e-6)
         # prepare mask
         ptcloud = []
         ptcloud.append(xyz)
@@ -325,7 +325,7 @@ class ScannetDatasetWholeScene():
                     xyz_min = np.amin(xyz, axis=0)
                     XYZ = xyz - xyz_min
                     xyz_max = np.amax(XYZ, axis=0)
-                    XYZ = XYZ/xyz_max
+                    XYZ = XYZ/(xyz_max + 1e-6)
                     # prepare mask
                     ptcloud = []
                     ptcloud.append(xyz)
@@ -415,7 +415,7 @@ class ScannetDatasetActiveLearning():
         xyz_min = np.amin(xyz, axis=0)
         XYZ = xyz - xyz_min
         xyz_max = np.amax(XYZ, axis=0)
-        XYZ = XYZ/xyz_max
+        XYZ = XYZ/(xyz_max + 1e-6)
         # prepare mask
         ptcloud = []
         ptcloud.append(xyz)
@@ -656,7 +656,7 @@ class ScannetDatasetActiveLearning():
                             xyz_min = np.amin(xyz, axis=0)
                             XYZ = xyz - xyz_min
                             xyz_max = np.amax(XYZ, axis=0)
-                            XYZ = XYZ/xyz_max
+                            XYZ = XYZ/(xyz_max + 1e-6)
                             # prepare mask
                             ptcloud = []
                             ptcloud.append(xyz)
